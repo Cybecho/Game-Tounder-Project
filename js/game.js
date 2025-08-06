@@ -79,7 +79,7 @@ class GameScene extends Phaser.Scene {
         this.lightningWaveCooldown = 15000; // 15초 쿨다운
         this.lightningWaveReady = true;
         this.lightningWaveLastUsed = 0;
-        this.lightningWaveRadius = 200; // 200x200 범위
+        this.lightningWaveRadius = 800; // 800x800 범위 (4배 확대)
     }
 
     preload() {
@@ -347,38 +347,52 @@ class GameScene extends Phaser.Scene {
             this.healthDisplay.push(heart);
         }
         
-        // 현대적인 능력 UI 컨테이너
-        const abilityContainer = this.add.container(620, 50).setScrollFactor(0);
+        // 현대적인 능력 UI 컨테이너 - 같은 라인 배치
+        const abilityContainer = this.add.container(590, 60).setScrollFactor(0);
         
-        // 대쉬 능력 UI
-        this.dashAbilities = [];
-        for (let i = 0; i < this.maxDashCharges; i++) {
-            const abilityUI = this.createModernAbilityUI(i * 50, 0, 20, '#00BCD4', 'D');
-            abilityContainer.add([abilityUI.bg, abilityUI.progress, abilityUI.icon]);
-            this.dashAbilities.push(abilityUI);
-        }
+        // 대쉬 능력 UI - 하나로 통일
+        const dashUI = this.createModernAbilityUI(0, 0, 28, '#00BCD4', 'D');
+        abilityContainer.add([dashUI.bg, dashUI.progress, dashUI.icon]);
+        this.dashUI = dashUI;
         
-        // 에너지 웨이브 능력 UI
-        const waveUI = this.createModernAbilityUI(0, 40, 28, '#00ffff', 'Q');
+        // 대쉬 카운터 텍스트
+        this.dashCountText = this.add.text(590, 85, '3', {
+            fontSize: '16px',
+            color: '#00BCD4',
+            fontFamily: 'Arial, sans-serif',
+            fontWeight: 'bold'
+        }).setScrollFactor(0).setOrigin(0.5);
+        
+        // 에너지 웨이브 능력 UI - 같은 크기, 같은 라인
+        const waveUI = this.createModernAbilityUI(80, 0, 28, '#4a90e2', '⚡');
         abilityContainer.add([waveUI.bg, waveUI.progress, waveUI.icon]);
         this.energyWaveUI = waveUI;
         
-        // 능력 설명
-        this.add.text(670, 50, 'DASH', {
-            fontSize: '12px',
+        // 현대적이고 깔끔한 능력 설명
+        this.add.text(680, 55, 'DASH', {
+            fontSize: '14px',
             color: '#ffffff',
-            fontWeight: '500'
+            fontFamily: 'Arial, sans-serif',
+            fontWeight: 'bold'
         }).setScrollFactor(0);
         
-        this.add.text(670, 90, 'ENERGY WAVE', {
-            fontSize: '12px',
-            color: '#ffffff',
-            fontWeight: '500'
-        }).setScrollFactor(0);
-        
-        this.add.text(670, 105, 'SPACE', {
+        this.add.text(680, 70, 'Click', {
             fontSize: '10px',
-            color: '#aaaaaa'
+            color: '#aaaaaa',
+            fontFamily: 'Arial, sans-serif'
+        }).setScrollFactor(0);
+        
+        this.add.text(740, 55, 'ENERGY BURST', {
+            fontSize: '14px',
+            color: '#ffffff',
+            fontFamily: 'Arial, sans-serif',
+            fontWeight: 'bold'
+        }).setScrollFactor(0);
+        
+        this.add.text(740, 70, 'Space', {
+            fontSize: '10px',
+            color: '#aaaaaa',
+            fontFamily: 'Arial, sans-serif'
         }).setScrollFactor(0);
         
         // 대쉬 안내 텍스트
@@ -856,51 +870,54 @@ class GameScene extends Phaser.Scene {
             }
         }
         
-        // 현대적인 대쉬 능력 UI 업데이트
-        for (let i = 0; i < this.maxDashCharges; i++) {
-            const ability = this.dashAbilities[i];
-            const { progress, icon, size, color } = ability;
+        // 통합된 대쉬 능력 UI 업데이트
+        const dashAbility = this.dashUI;
+        const { progress: dashProgress, icon: dashIcon, size: dashSize, color: dashColor } = dashAbility;
+        
+        dashProgress.clear();
+        
+        // 대쉬 카운터 업데이트
+        this.dashCountText.setText(this.dashCharges.toString());
+        
+        if (this.dashCharges > 0) {
+            // 사용 가능 상태
+            dashIcon.setColor(dashColor).setAlpha(1);
+            this.dashCountText.setColor('#00BCD4').setAlpha(1);
             
-            progress.clear();
+            // 활성화된 외곽선
+            dashProgress.lineStyle(3, Phaser.Display.Color.HexStringToColor(dashColor).color, 0.8);
+            dashProgress.strokeCircle(0, 0, dashSize);
             
-            if (i < this.dashCharges) {
-                // 사용 가능 - 풀 차지 상태
-                icon.setColor(color).setAlpha(1);
+            // 내부 글로우 효과
+            dashProgress.lineStyle(1, 0xffffff, 0.3);
+            dashProgress.strokeCircle(0, 0, dashSize - 3);
+            
+        } else {
+            // 모든 차지가 쿨다운 중
+            const oldestCooldown = Math.max(...this.dashCooldowns);
+            const cooldownProgress = Math.max(0, 1 - (oldestCooldown / this.dashCooldown));
+            
+            dashIcon.setColor('#666666').setAlpha(0.4 + (cooldownProgress * 0.6));
+            this.dashCountText.setColor('#666666').setAlpha(0.5);
+            
+            // 진행률 호
+            if (cooldownProgress > 0) {
+                const startAngle = -Math.PI / 2;
+                const endAngle = startAngle + (cooldownProgress * Math.PI * 2);
                 
-                // 활성화된 외곽선
-                progress.lineStyle(3, Phaser.Display.Color.HexStringToColor(color).color, 0.8);
-                progress.strokeCircle(0, 0, size);
+                dashProgress.lineStyle(4, Phaser.Display.Color.HexStringToColor(dashColor).color, 0.9);
+                dashProgress.beginPath();
+                dashProgress.arc(0, 0, dashSize, startAngle, endAngle);
+                dashProgress.strokePath();
                 
-                // 내부 글로우 효과
-                progress.lineStyle(1, 0xffffff, 0.3);
-                progress.strokeCircle(0, 0, size - 3);
-                
-            } else {
-                // 쿨다운 중
-                const cooldownProgress = Math.max(0, 1 - (this.dashCooldowns[i] / this.dashCooldown));
-                icon.setColor('#666666').setAlpha(0.4 + (cooldownProgress * 0.6));
-                
-                // 진행률 호 (부드러운 그라데이션 효과)
-                if (cooldownProgress > 0) {
-                    const startAngle = -Math.PI / 2;
-                    const endAngle = startAngle + (cooldownProgress * Math.PI * 2);
-                    
-                    // 메인 진행률 호
-                    progress.lineStyle(4, Phaser.Display.Color.HexStringToColor(color).color, 0.9);
-                    progress.beginPath();
-                    progress.arc(0, 0, size, startAngle, endAngle);
-                    progress.strokePath();
-                    
-                    // 내부 하이라이트
-                    progress.lineStyle(2, 0xffffff, 0.4);
-                    progress.beginPath();
-                    progress.arc(0, 0, size - 2, startAngle, endAngle);
-                    progress.strokePath();
-                }
+                dashProgress.lineStyle(2, 0xffffff, 0.4);
+                dashProgress.beginPath();
+                dashProgress.arc(0, 0, dashSize - 2, startAngle, endAngle);
+                dashProgress.strokePath();
             }
         }
         
-        // 현대적인 에너지 웨이브 UI 업데이트
+        // 현대적인 에너지 버스트 UI 업데이트
         const waveAbility = this.energyWaveUI;
         const { progress: waveProgress, icon: waveIcon, size: waveSize, color: waveColor } = waveAbility;
         
@@ -993,8 +1010,8 @@ class GameScene extends Phaser.Scene {
         // 원형 기 분출 이펙트
         this.createEnergyWaveEffect(playerX, playerY);
         
-        // 강력한 화면 흔들림 (타격감만 공유)
-        this.cameras.main.shake(600, 0.08);
+        // 적당한 화면 흔들림 (과도하지 않게 조정)
+        this.cameras.main.shake(300, 0.04);
         
         // 주변 적들에게 강력한 넉백 적용
         this.enemies.children.entries.forEach(enemy => {
@@ -1002,16 +1019,39 @@ class GameScene extends Phaser.Scene {
                 const distance = Phaser.Math.Distance.Between(playerX, playerY, enemy.x, enemy.y);
                 
                 if (distance <= this.lightningWaveRadius) {
-                    // 매우 강한 넉백 (적이 완전히 밀려나도록)
+                    // 극적이고 강력한 넉백 효과
                     const angle = Phaser.Math.Angle.Between(playerX, playerY, enemy.x, enemy.y);
-                    const knockbackForce = 800; // 매우 강함
+                    const knockbackForce = 1600; // 최대 파워
                     enemy.knockbackX = Math.cos(angle) * knockbackForce;
                     enemy.knockbackY = Math.sin(angle) * knockbackForce;
                     
-                    // 피격 효과
+                    // 적의 극적인 튕겨나가는 효과
+                    enemy.setTint(0xffffff); // 흰색으로 번쩍
+                    this.tweens.add({
+                        targets: enemy,
+                        scaleX: 1.3,
+                        scaleY: 1.3,
+                        duration: 100,
+                        yoyo: true,
+                        ease: 'Power2.easeOut'
+                    });
+                    
+                    // 피격 효과와 스핀 효과
                     if (!enemy.isFlashing) {
                         enemy.isFlashing = true;
                         this.createHitFlashEffect(enemy);
+                        
+                        // 회전 효과로 튕겨나가는 느낌 강화
+                        enemy.setAngularVelocity(Phaser.Math.Between(-500, 500));
+                        
+                        // 일정 시간 후 색상과 회전 복구
+                        this.time.delayedCall(500, () => {
+                            if (enemy.active) {
+                                enemy.clearTint();
+                                enemy.setAngularVelocity(0);
+                                enemy.setRotation(0);
+                            }
+                        });
                     }
                 }
             }
@@ -1019,71 +1059,99 @@ class GameScene extends Phaser.Scene {
     }
 
     createEnergyWaveEffect(centerX, centerY) {
-        // 중심 에너지 코어
-        const energyCore = this.add.graphics();
-        energyCore.fillStyle(0x00ffff, 0.8);
-        energyCore.fillCircle(centerX, centerY, 15);
+        // 매우 큰 중심 기 폭발 효과 (5배 크기)
+        const energyBurst = this.add.graphics();
+        energyBurst.fillStyle(0xffffff, 0.95);
+        energyBurst.fillCircle(centerX, centerY, 40); // 8 * 5
         
-        // 메인 에너지 웨이브 (강한 청색)
-        const mainWave = this.add.graphics();
-        mainWave.lineStyle(6, 0x00ffff, 0.9);
-        mainWave.strokeCircle(centerX, centerY, 20);
+        const innerCore = this.add.graphics();
+        innerCore.fillStyle(0x00ffff, 0.85);
+        innerCore.fillCircle(centerX, centerY, 60); // 12 * 5
         
-        // 외곽 충격파 (밝은 청색)
-        const shockWave = this.add.graphics();
-        shockWave.lineStyle(10, 0x88ffff, 0.7);
-        shockWave.strokeCircle(centerX, centerY, 25);
+        const outerCore = this.add.graphics();
+        outerCore.fillStyle(0x4488ff, 0.7);
+        outerCore.fillCircle(centerX, centerY, 80); // 16 * 5
         
-        // 최외곽 파동 (연한 청색)
+        // 거대한 원형 기 분출 웨이브 (5배 크기)
+        const primaryWave = this.add.graphics();
+        primaryWave.lineStyle(20, 0x00ffff, 0.9); // 8 * 2.5
+        primaryWave.strokeCircle(centerX, centerY, 90); // 18 * 5
+        
+        const secondaryWave = this.add.graphics();
+        secondaryWave.lineStyle(15, 0xffffff, 0.8); // 6 * 2.5
+        secondaryWave.strokeCircle(centerX, centerY, 110); // 22 * 5
+        
         const outerWave = this.add.graphics();
-        outerWave.lineStyle(4, 0xaaffff, 0.5);
-        outerWave.strokeCircle(centerX, centerY, 30);
+        outerWave.lineStyle(10, 0x88ddff, 0.6); // 4 * 2.5
+        outerWave.strokeCircle(centerX, centerY, 130); // 26 * 5
         
-        // 동심원 확장 애니메이션
+        // 부드럽고 쫀득한 확산 애니메이션
         this.tweens.add({
-            targets: mainWave,
-            scaleX: 10,
-            scaleY: 10,
+            targets: primaryWave,
+            scaleX: 15, // 더 큰 스케일
+            scaleY: 15,
             alpha: 0,
-            duration: 500,
-            ease: 'Power2.easeOut'
+            duration: 600, // 더 길게
+            ease: 'Cubic.easeOut' // 더 부드러운 곡선
         });
         
         this.tweens.add({
-            targets: shockWave,
-            scaleX: 8,
-            scaleY: 8,
+            targets: secondaryWave,
+            scaleX: 12,
+            scaleY: 12,
             alpha: 0,
-            duration: 400,
+            duration: 550,
             delay: 50,
-            ease: 'Power2.easeOut'
+            ease: 'Cubic.easeOut'
         });
         
         this.tweens.add({
             targets: outerWave,
-            scaleX: 6,
+            scaleX: 10,
+            scaleY: 10,
+            alpha: 0,
+            duration: 500,
+            delay: 100,
+            ease: 'Cubic.easeOut'
+        });
+        
+        // 중심부 매우 부드러운 펄스 효과
+        this.tweens.add({
+            targets: energyBurst,
+            scaleX: 6, // 더 큰 확장
             scaleY: 6,
             alpha: 0,
-            duration: 350,
-            delay: 100,
-            ease: 'Power2.easeOut'
+            duration: 400,
+            ease: 'Cubic.easeOut'
         });
         
-        // 중심 코어 펄스 효과
         this.tweens.add({
-            targets: energyCore,
-            scaleX: 3,
-            scaleY: 3,
+            targets: innerCore,
+            scaleX: 5,
+            scaleY: 5,
             alpha: 0,
-            duration: 300,
-            ease: 'Power3.easeOut'
+            duration: 450,
+            delay: 30,
+            ease: 'Cubic.easeOut'
         });
         
-        // 모든 이펙트 정리
-        this.time.delayedCall(600, () => {
-            if (energyCore.active) energyCore.destroy();
-            if (mainWave.active) mainWave.destroy();
-            if (shockWave.active) shockWave.destroy();
+        this.tweens.add({
+            targets: outerCore,
+            scaleX: 4,
+            scaleY: 4,
+            alpha: 0,
+            duration: 500,
+            delay: 60,
+            ease: 'Cubic.easeOut'
+        });
+        
+        // 이펙트 정리
+        this.time.delayedCall(700, () => {
+            if (energyBurst.active) energyBurst.destroy();
+            if (innerCore.active) innerCore.destroy();
+            if (outerCore.active) outerCore.destroy();
+            if (primaryWave.active) primaryWave.destroy();
+            if (secondaryWave.active) secondaryWave.destroy();
             if (outerWave.active) outerWave.destroy();
         });
     }
