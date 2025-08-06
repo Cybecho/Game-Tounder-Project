@@ -1,0 +1,1689 @@
+class GameScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'GameScene' });
+        this.initializeGameVariables();
+    }
+
+    initializeGameVariables() {
+        // 오브젝트 변수들
+        this.player = null;
+        this.enemies = null;
+        this.bullets = null;
+        this.energy = null;
+        this.bulletUpgrades = null;
+        this.explosions = null;
+        this.cursors = null;
+        this.wasd = null;
+        
+        // 게임 상태 변수들
+        this.lastFired = 0;
+        this.fireRate = 200;
+        this.playerSpeed = 400;
+        this.bulletSpeed = 700;
+        this.baseEnemySpeed = 100;
+        this.score = 0;
+        this.weaponLevel = 1;
+        this.bulletCount = 1;
+        this.gameTime = 0;
+        this.eliteKills = 0;
+        
+        // UI 관련
+        this.scoreText = null;
+        this.weaponLevelText = null;
+        this.survivalTimeDisplay = null;
+        
+        // 물리/이동 관련
+        this.playerVelocity = { x: 0, y: 0 };
+        this.playerAcceleration = 1200;
+        this.playerDrag = 900;
+        this.fireRange = 300;
+        
+        // 월드 크기
+        this.worldWidth = 8000;
+        this.worldHeight = 6000;
+        
+        // 플레이어 상태
+        this.playerHealth = 3;
+        this.maxPlayerHealth = 3;
+        this.experience = 0;
+        this.experienceToNext = 100;
+        
+        // 적 스폰 관련
+        this.enemySpawnRate = 1200;
+        this.difficultyLevel = 1;
+        this.enemiesPerWave = 1;
+        this.lastSpawnTime = 0;
+        
+        // 대쉬 시스템
+        this.dashCharges = 3;
+        this.maxDashCharges = 3;
+        this.dashCooldown = 4000;
+        this.dashDistance = 2000;
+        this.dashSpeed = 5000;
+        this.dashAcceleration = 15000;
+        this.isDashing = false;
+        this.dashCooldowns = [0, 0, 0];
+        this.dashGhosts = [];
+        this.dashLightning = null;
+        
+        // 아이템 시스템
+        this.bulletUpgradeSpawnRate = 15000;
+        this.lastBulletUpgradeSpawn = 0;
+        
+        // 엘리트 몬스터 시스템
+        this.eliteSpawnRate = 45000;
+        this.eliteSpawnChance = 0.15;
+        this.lastEliteSpawn = 0;
+        
+        // 번개 파동파 시스템
+        this.lightningWaveCooldown = 15000; // 15초 쿨다운
+        this.lightningWaveReady = true;
+        this.lightningWaveLastUsed = 0;
+        this.lightningWaveRadius = 200; // 200x200 범위
+    }
+
+    preload() {
+        // 간단하고 안정적인 이미지들로 교체
+        this.load.image('player', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="12" fill="#4CAF50" stroke="#2E7D32" stroke-width="2"/>
+                <circle cx="16" cy="16" r="6" fill="#81C784"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy1', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="20" height="20" fill="#F44336" stroke="#C62828" stroke-width="2"/>
+                <rect x="8" y="8" width="8" height="8" fill="#E57373"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy2', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="10,2 18,18 10,14 2,18" fill="#FF5722" stroke="#BF360C" stroke-width="2"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy3', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="28" height="28" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="14" cy="14" r="12" fill="#9C27B0" stroke="#4A148C" stroke-width="2"/>
+                <circle cx="14" cy="14" r="6" fill="#BA68C8"/>
+            </svg>
+        `));
+        
+        this.load.image('bullet', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="8" height="8" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="4" cy="4" r="3" fill="#FFD54F" stroke="#FF8F00" stroke-width="1"/>
+            </svg>
+        `));
+        
+        this.load.image('energy', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="16" height="16" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="8,1 10,6 15,6 11,9 13,15 8,12 3,15 5,9 1,6 6,6" fill="#9C27B0" stroke="#6A1B9A" stroke-width="1"/>
+            </svg>
+        `));
+        
+        this.load.image('explosion', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="40" height="40" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#FF6B35"/>
+                <circle cx="20" cy="20" r="12" fill="#FFE66D"/>
+                <circle cx="20" cy="20" r="6" fill="#FFFFFF"/>
+            </svg>
+        `));
+        
+        this.load.image('bullet_upgrade', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="16" height="16" fill="#FFC107" stroke="#FF8F00" stroke-width="2" rx="2"/>
+                <rect x="8" y="6" width="4" height="2" fill="#FFFFFF"/>
+                <rect x="6" y="8" width="8" height="2" fill="#FFFFFF"/>
+                <rect x="8" y="10" width="4" height="2" fill="#FFFFFF"/>
+            </svg>
+        `));
+        
+        this.load.image('elite_monster', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="80" height="80" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="40" cy="40" r="35" fill="#8E24AA" stroke="#4A148C" stroke-width="4"/>
+                <circle cx="40" cy="40" r="25" fill="#9C27B0"/>
+                <circle cx="40" cy="40" r="15" fill="#BA68C8"/>
+                <circle cx="40" cy="40" r="8" fill="#E1BEE7"/>
+                <polygon points="40,10 45,25 40,22 35,25" fill="#FFD700"/>
+                <polygon points="40,70 45,55 40,58 35,55" fill="#FFD700"/>
+                <polygon points="10,40 25,45 22,40 25,35" fill="#FFD700"/>
+                <polygon points="70,40 55,45 58,40 55,35" fill="#FFD700"/>
+            </svg>
+        `));
+    }
+
+    create() {
+        // 게임 재시작시 모든 변수 초기화
+        this.initializeGameVariables();
+        
+        // 월드 경계 설정
+        this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
+        
+        // 격자 배경 생성
+        this.createGridBackground();
+        
+        this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'player');
+        this.player.setCollideWorldBounds(true);
+        this.player.setDrag(this.playerDrag);
+        this.player.setMaxVelocity(this.playerSpeed);
+        
+        this.enemies = this.physics.add.group();
+        this.bullets = this.physics.add.group();
+        this.energy = this.physics.add.group();
+        this.bulletUpgrades = this.physics.add.group();
+        this.explosions = this.add.group();
+        this.dashEffects = this.add.group();
+        
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys('W,S,A,D');
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        
+        // 마우스 클릭 이벤트 추가
+        this.input.on('pointerdown', this.onPointerDown, this);
+        
+        // 카메라 설정
+        this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight);
+        this.cameras.main.startFollow(this.player, true, 0.05, 0.05);
+        
+        this.createUI();
+        
+        // 적 스폰 타이머
+        this.enemySpawnTimer = this.time.addEvent({
+            delay: this.enemySpawnRate,
+            callback: this.spawnEnemyWave,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 게임 시간 및 난이도 타이머
+        this.time.addEvent({
+            delay: 1000,
+            callback: this.updateGameTime,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 대쉬 쿨다운 업데이트 타이머
+        this.time.addEvent({
+            delay: 100,
+            callback: this.updateDashCooldowns,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 탄환 업그레이드 스폰 타이머
+        this.time.addEvent({
+            delay: this.bulletUpgradeSpawnRate,
+            callback: this.spawnBulletUpgrade,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 엘리트 몬스터 스폰 타이머
+        this.time.addEvent({
+            delay: this.eliteSpawnRate,
+            callback: this.trySpawnEliteMonster,
+            callbackScope: this,
+            loop: true
+        });
+        
+        this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.player, this.energy, this.collectEnergy, null, this);
+        this.physics.add.overlap(this.player, this.bulletUpgrades, this.collectBulletUpgrade, null, this);
+        this.physics.add.overlap(this.player, this.enemies, this.playerHit, null, this);
+    }
+
+    createGridBackground() {
+        // 블루프린트 스타일 격자 배경
+        this.gridGraphics = this.add.graphics();
+        this.gridGraphics.lineStyle(1, 0x1a2a3a, 0.6); // 어두운 청색, 60% 투명도
+        
+        const gridSize = 100; // 격자 크기
+        const lineWidth = this.worldWidth;
+        const lineHeight = this.worldHeight;
+        
+        // 세로 격자선
+        for (let x = 0; x <= this.worldWidth; x += gridSize) {
+            this.gridGraphics.moveTo(x, 0);
+            this.gridGraphics.lineTo(x, this.worldHeight);
+        }
+        
+        // 가로 격자선
+        for (let y = 0; y <= this.worldHeight; y += gridSize) {
+            this.gridGraphics.moveTo(0, y);
+            this.gridGraphics.lineTo(this.worldWidth, y);
+        }
+        
+        this.gridGraphics.strokePath();
+        
+        // 더 두꺼운 메인 격자선 (500px 간격)
+        this.gridGraphics.lineStyle(2, 0x2a4a5a, 0.8);
+        
+        for (let x = 0; x <= this.worldWidth; x += 500) {
+            this.gridGraphics.moveTo(x, 0);
+            this.gridGraphics.lineTo(x, this.worldHeight);
+        }
+        
+        for (let y = 0; y <= this.worldHeight; y += 500) {
+            this.gridGraphics.moveTo(0, y);
+            this.gridGraphics.lineTo(this.worldWidth, y);
+        }
+        
+        this.gridGraphics.strokePath();
+        this.gridGraphics.setDepth(-1); // 배경으로 설정
+    }
+
+    createModernAbilityUI(x, y, size, color, keyText) {
+        // 배경 원 (다크 테마)
+        const bg = this.add.graphics();
+        bg.fillStyle(0x1a1a1a, 0.8);
+        bg.fillCircle(x, y, size);
+        bg.lineStyle(2, 0x333333, 0.6);
+        bg.strokeCircle(x, y, size);
+        
+        // 진행률 원 (비활성화 상태)
+        const progress = this.add.graphics();
+        progress.x = x;
+        progress.y = y;
+        
+        // 키 텍스트 (중앙 배치)
+        const icon = this.add.text(x, y, keyText, {
+            fontSize: `${Math.floor(size * 0.6)}px`,
+            color: color,
+            fontWeight: '600'
+        }).setOrigin(0.5, 0.5);
+        
+        return { bg, progress, icon, size, color };
+    }
+
+    createUI() {
+        // 중앙 생존시간 UI
+        this.survivalTimeDisplay = this.add.text(400, 50, '00:00', {
+            fontSize: '48px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 4,
+            fontWeight: 'bold'
+        }).setOrigin(0.5).setScrollFactor(0);
+        
+        // 생존시간 배경
+        this.survivalBg = this.add.rectangle(400, 50, 200, 60, 0x000000, 0.7).setScrollFactor(0);
+        this.survivalBg.setStrokeStyle(2, 0xffffff);
+        this.survivalTimeDisplay.setDepth(1);
+        
+        // 점수
+        this.scoreText = this.add.text(16, 16, 'Score: 0', {
+            fontSize: '20px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setScrollFactor(0);
+        
+        // 난이도
+        this.difficultyText = this.add.text(16, 46, 'Wave: 1', {
+            fontSize: '18px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setScrollFactor(0);
+        
+        // 총알 개수 표시
+        this.bulletCountText = this.add.text(16, 76, 'Bullets: 1', {
+            fontSize: '18px',
+            color: '#FFD54F',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setScrollFactor(0);
+        
+        // 체력 하트
+        this.healthDisplay = [];
+        for (let i = 0; i < this.maxPlayerHealth; i++) {
+            const heart = this.add.text(650 + i * 30, 16, '♥', {
+                fontSize: '24px',
+                color: '#ff0000'
+            }).setScrollFactor(0);
+            this.healthDisplay.push(heart);
+        }
+        
+        // 현대적인 능력 UI 컨테이너
+        const abilityContainer = this.add.container(620, 50).setScrollFactor(0);
+        
+        // 대쉬 능력 UI
+        this.dashAbilities = [];
+        for (let i = 0; i < this.maxDashCharges; i++) {
+            const abilityUI = this.createModernAbilityUI(i * 50, 0, 20, '#00BCD4', 'D');
+            abilityContainer.add([abilityUI.bg, abilityUI.progress, abilityUI.icon]);
+            this.dashAbilities.push(abilityUI);
+        }
+        
+        // 에너지 웨이브 능력 UI
+        const waveUI = this.createModernAbilityUI(0, 40, 28, '#00ffff', 'Q');
+        abilityContainer.add([waveUI.bg, waveUI.progress, waveUI.icon]);
+        this.energyWaveUI = waveUI;
+        
+        // 능력 설명
+        this.add.text(670, 50, 'DASH', {
+            fontSize: '12px',
+            color: '#ffffff',
+            fontWeight: '500'
+        }).setScrollFactor(0);
+        
+        this.add.text(670, 90, 'ENERGY WAVE', {
+            fontSize: '12px',
+            color: '#ffffff',
+            fontWeight: '500'
+        }).setScrollFactor(0);
+        
+        this.add.text(670, 105, 'SPACE', {
+            fontSize: '10px',
+            color: '#aaaaaa'
+        }).setScrollFactor(0);
+        
+        // 대쉬 안내 텍스트
+        this.add.text(16, 106, 'Click to Dash (Super Long!)', {
+            fontSize: '14px',
+            color: '#aaaaaa',
+            stroke: '#000000',
+            strokeThickness: 1
+        }).setScrollFactor(0);
+        
+        // UI 바들의 배경
+        this.uiBackground = this.add.rectangle(400, 565, 780, 70, 0x000000, 0.7).setScrollFactor(0);
+        this.uiBackground.setStrokeStyle(2, 0x333333);
+        
+        // 경험치 바 배경  
+        this.expBarBg = this.add.rectangle(200, 575, 350, 20, 0x444444).setScrollFactor(0);
+        this.expBarBg.setStrokeStyle(2, 0xaaaaaa);
+        
+        // 경험치 바
+        this.expBar = this.add.rectangle(25, 575, 0, 16, 0x0088ff).setScrollFactor(0);
+        this.expBar.setOrigin(0, 0.5);
+        
+        // 경험치 텍스트
+        this.expText = this.add.text(570, 575, '0/100 EXP', {
+            fontSize: '16px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 1
+        }).setScrollFactor(0);
+    }
+
+    onPointerDown(pointer) {
+        if (this.isDashing || this.dashCharges <= 0) return;
+        
+        // 월드 좌표로 변환
+        const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+        
+        // 플레이어에서 클릭 위치로의 방향 계산
+        const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, worldPoint.x, worldPoint.y);
+        
+        this.performDash(angle);
+    }
+
+    performDash(angle) {
+        this.isDashing = true;
+        this.dashCharges -= 1;
+        
+        // 대쉬 쿨다운 설정
+        for (let i = 0; i < 3; i++) {
+            if (this.dashCooldowns[i] <= 0) {
+                this.dashCooldowns[i] = this.dashCooldown;
+                break;
+            }
+        }
+        
+        // 시작 위치 저장
+        const startX = this.player.x;
+        const startY = this.player.y;
+        
+        // 목표 위치 계산 (즉시 이동할 거리)
+        const dashDistance = 400; // 더 짧고 정확한 거리
+        const targetX = startX + Math.cos(angle) * dashDistance;
+        const targetY = startY + Math.sin(angle) * dashDistance;
+        
+        // 월드 경계 내로 제한
+        const clampedTargetX = Phaser.Math.Clamp(targetX, 50, this.worldWidth - 50);
+        const clampedTargetY = Phaser.Math.Clamp(targetY, 50, this.worldHeight - 50);
+        
+        // 번개 이펙트 생성 (시작점에서 목표점까지)
+        this.createInstantLightningEffect(startX, startY, clampedTargetX, clampedTargetY);
+        
+        // 강력한 화면 플래시
+        const flashRect = this.add.rectangle(400, 300, 800, 600, 0xffffff, 1.0).setScrollFactor(0);
+        this.tweens.add({
+            targets: flashRect,
+            alpha: 0,
+            duration: 100,
+            onComplete: () => flashRect.destroy()
+        });
+        
+        // 즉시 위치 이동 (파팟!)
+        this.player.setPosition(clampedTargetX, clampedTargetY);
+        this.player.setVelocity(0, 0); // 속도 0으로 초기화
+        
+        // 강력한 화면 흔들림
+        this.cameras.main.shake(300, 0.06);
+        
+        // 시원한 잔상 효과
+        this.createInstantDashTrail(startX, startY, clampedTargetX, clampedTargetY);
+        
+        // 플레이어 강조 효과
+        this.player.setTint(0x00ffff);
+        this.player.setAlpha(0.8);
+        this.player.setScale(1.3);
+        
+        // 착지 폭발 효과
+        this.createExplosion(clampedTargetX, clampedTargetY);
+        
+        // 대쉬 효과 지속 시간 (200ms로 단축)
+        this.time.delayedCall(200, () => {
+            this.isDashing = false;
+            if (this.player.active) {
+                this.player.setTint(0xffffff);
+                this.player.setAlpha(1);
+                this.player.setScale(1);
+            }
+        });
+    }
+
+    createInstantLightningEffect(startX, startY, endX, endY) {
+        // 직선 번개 (즉시 이동이므로)
+        const lightning = this.add.graphics();
+        lightning.lineStyle(12, 0x00ffff, 1);
+        lightning.moveTo(startX, startY);
+        lightning.lineTo(endX, endY);
+        lightning.strokePath();
+        
+        // 번개 외곽선
+        const outerLightning = this.add.graphics();
+        outerLightning.lineStyle(20, 0xffffff, 0.6);
+        outerLightning.moveTo(startX, startY);
+        outerLightning.lineTo(endX, endY);
+        outerLightning.strokePath();
+        
+        // 번개 사라지는 효과
+        this.tweens.add({
+            targets: [lightning, outerLightning],
+            alpha: 0,
+            duration: 150,
+            onComplete: () => {
+                lightning.destroy();
+                outerLightning.destroy();
+            }
+        });
+    }
+
+    createInstantDashTrail(startX, startY, endX, endY) {
+        // 시작점에서 끝점까지의 잔상들
+        const trailCount = 8;
+        for (let i = 0; i < trailCount; i++) {
+            const progress = i / (trailCount - 1);
+            const trailX = startX + (endX - startX) * progress;
+            const trailY = startY + (endY - startY) * progress;
+            
+            const trail = this.add.sprite(trailX, trailY, 'player');
+            trail.setTint(0x00ffff);
+            trail.setAlpha(0.8 - (i * 0.1));
+            trail.setScale(1.2 - (i * 0.1));
+            
+            this.tweens.add({
+                targets: trail,
+                alpha: 0,
+                scale: 0.3,
+                duration: 300 + (i * 50),
+                onComplete: () => trail.destroy()
+            });
+        }
+    }
+
+    createLightningEffect(angle) {
+        // 번개 경로 생성
+        const startX = this.player.x;
+        const startY = this.player.y;
+        const endX = startX + Math.cos(angle) * this.dashDistance;
+        const endY = startY + Math.sin(angle) * this.dashDistance;
+        
+        const lightning = this.add.graphics();
+        lightning.lineStyle(8, 0x00ffff, 1);
+        lightning.moveTo(startX, startY);
+        
+        // 지그재그 번개 경로
+        const segments = 12;
+        for (let i = 1; i <= segments; i++) {
+            const progress = i / segments;
+            const baseX = startX + (endX - startX) * progress;
+            const baseY = startY + (endY - startY) * progress;
+            
+            // 번개의 지그재그 효과
+            const zigzag = Math.sin(progress * Math.PI * 6) * 30 * (1 - progress * 0.5);
+            const perpAngle = angle + Math.PI / 2;
+            const zigzagX = baseX + Math.cos(perpAngle) * zigzag;
+            const zigzagY = baseY + Math.sin(perpAngle) * zigzag;
+            
+            lightning.lineTo(zigzagX, zigzagY);
+        }
+        
+        lightning.strokePath();
+        
+        // 번개 사라지는 효과
+        this.tweens.add({
+            targets: lightning,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => lightning.destroy()
+        });
+        
+        // 추가 번개 줄기들
+        for (let branch = 0; branch < 3; branch++) {
+            this.time.delayedCall(branch * 50, () => {
+                const branchLightning = this.add.graphics();
+                branchLightning.lineStyle(4, 0x88ffff, 0.8);
+                
+                const branchProgress = 0.3 + branch * 0.2;
+                const branchStartX = startX + (endX - startX) * branchProgress;
+                const branchStartY = startY + (endY - startY) * branchProgress;
+                
+                const branchAngle = angle + (Math.random() - 0.5) * Math.PI * 0.5;
+                const branchLength = 150;
+                const branchEndX = branchStartX + Math.cos(branchAngle) * branchLength;
+                const branchEndY = branchStartY + Math.sin(branchAngle) * branchLength;
+                
+                branchLightning.moveTo(branchStartX, branchStartY);
+                branchLightning.lineTo(branchEndX, branchEndY);
+                branchLightning.strokePath();
+                
+                this.tweens.add({
+                    targets: branchLightning,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: () => branchLightning.destroy()
+                });
+            });
+        }
+    }
+
+    createLightningGhosts() {
+        const ghostCount = 25; // 더 많은 잔상
+        const ghostInterval = 15;
+        
+        for (let i = 0; i < ghostCount; i++) {
+            this.time.delayedCall(i * ghostInterval, () => {
+                if (this.isDashing && this.player.active) {
+                    const ghost = this.add.sprite(this.player.x, this.player.y, 'player');
+                    ghost.setTint(0x00ffff);
+                    ghost.setAlpha(0.9 - (i * 0.03));
+                    ghost.setScale(1.5 - (i * 0.04));
+                    
+                    this.tweens.add({
+                        targets: ghost,
+                        alpha: 0,
+                        scale: 0.2,
+                        duration: 400,
+                        onComplete: () => {
+                            ghost.destroy();
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    createDashGhosts() {
+        // 기존 함수는 createLightningGhosts로 대체됨
+        this.createLightningGhosts();
+    }
+
+    updateDashCooldowns() {
+        let availableCharges = 0;
+        
+        for (let i = 0; i < 3; i++) {
+            if (this.dashCooldowns[i] > 0) {
+                this.dashCooldowns[i] -= 100;
+            }
+            if (this.dashCooldowns[i] <= 0) {
+                availableCharges++;
+            }
+        }
+        
+        this.dashCharges = Math.min(availableCharges, this.maxDashCharges);
+    }
+
+    spawnBulletUpgrade() {
+        // 매우 낮은 확률로 스폰 (30% 확률)
+        if (Math.random() > 0.3) return;
+        
+        // 플레이어로부터 멀리 스폰
+        const spawnRadius = 800;
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const distance = Phaser.Math.FloatBetween(spawnRadius, spawnRadius + 300);
+        
+        const x = this.player.x + Math.cos(angle) * distance;
+        const y = this.player.y + Math.sin(angle) * distance;
+        
+        // 월드 경계 내에서만 스폰
+        const clampedX = Phaser.Math.Clamp(x, 50, this.worldWidth - 50);
+        const clampedY = Phaser.Math.Clamp(y, 50, this.worldHeight - 50);
+        
+        const bulletUpgrade = this.physics.add.sprite(clampedX, clampedY, 'bullet_upgrade');
+        bulletUpgrade.setScale(1.2);
+        bulletUpgrade.fleeSpeed = 150; // 도망 속도
+        bulletUpgrade.detectionRange = 200; // 플레이어 감지 범위
+        
+        // 반짝이는 효과
+        this.tweens.add({
+            targets: bulletUpgrade,
+            alpha: 0.5,
+            duration: 500,
+            yoyo: true,
+            repeat: -1
+        });
+        
+        this.bulletUpgrades.add(bulletUpgrade);
+    }
+
+    trySpawnEliteMonster() {
+        // 낮은 확률로 엘리트 몬스터 스폰
+        if (Math.random() < this.eliteSpawnChance) {
+            this.spawnEliteMonster();
+        }
+    }
+
+    spawnEliteMonster() {
+        // 플레이어로부터 멀리 스폰
+        const spawnRadius = 1000;
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const distance = Phaser.Math.FloatBetween(spawnRadius, spawnRadius + 400);
+        
+        const x = this.player.x + Math.cos(angle) * distance;
+        const y = this.player.y + Math.sin(angle) * distance;
+        
+        // 월드 경계 내에서만 스폰
+        const clampedX = Phaser.Math.Clamp(x, 100, this.worldWidth - 100);
+        const clampedY = Phaser.Math.Clamp(y, 100, this.worldHeight - 100);
+        
+        const eliteMonster = this.physics.add.sprite(clampedX, clampedY, 'elite_monster');
+        eliteMonster.enemyType = 'elite_monster';
+        eliteMonster.health = 50; // 10배 이상의 체력
+        eliteMonster.maxHealth = eliteMonster.health;
+        eliteMonster.speed = this.baseEnemySpeed * 0.3; // 느린 속도
+        eliteMonster.isHit = false;
+        eliteMonster.isFlashing = false;
+        eliteMonster.knockbackX = 0;
+        eliteMonster.knockbackY = 0;
+        eliteMonster.isElite = true;
+        
+        // 엘리트 몬스터는 더 큰 바디 사이즈
+        eliteMonster.setScale(1.0);
+        eliteMonster.body.setSize(100, 100);
+        
+        // 반짝이는 효과
+        this.tweens.add({
+            targets: eliteMonster,
+            alpha: 0.7,
+            duration: 1000,
+            yoyo: true,
+            repeat: -1
+        });
+        
+        // 체력 바 생성
+        this.createEliteHealthBar(eliteMonster);
+        
+        this.enemies.add(eliteMonster);
+        
+        console.log('Elite monster spawned!');
+    }
+
+    createEliteHealthBar(elite) {
+        // 체력 바 배경
+        const healthBarBg = this.add.rectangle(elite.x, elite.y - 80, 120, 12, 0x660000);
+        healthBarBg.setStrokeStyle(2, 0xffffff);
+        
+        // 체력 바
+        const healthBar = this.add.rectangle(elite.x - 60, elite.y - 80, 0, 8, 0xff0000);
+        healthBar.setOrigin(0, 0.5);
+        
+        // 엘리트 이름 태그
+        const nameTag = this.add.text(elite.x, elite.y - 100, 'ELITE', {
+            fontSize: '14px',
+            color: '#FFD700',
+            stroke: '#000000',
+            strokeThickness: 2,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        elite.healthBarBg = healthBarBg;
+        elite.healthBar = healthBar;
+        elite.nameTag = nameTag;
+    }
+
+    update(time, delta) {
+        this.movePlayer(delta);
+        this.fireWeapon(time);
+        this.handleLightningWave(time);
+        this.moveEnemies(delta);
+        this.moveBullets();
+        this.moveEnergy();
+        this.moveBulletUpgrades(delta);
+        this.updateExplosions();
+        this.updateUI();
+    }
+
+    moveBulletUpgrades(delta) {
+        this.bulletUpgrades.children.entries.forEach(upgrade => {
+            if (upgrade.active) {
+                const distance = Phaser.Math.Distance.Between(this.player.x, this.player.y, upgrade.x, upgrade.y);
+                
+                // 플레이어가 감지 범위에 들어오면 도망
+                if (distance < upgrade.detectionRange) {
+                    const fleeAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, upgrade.x, upgrade.y);
+                    const velocityX = Math.cos(fleeAngle) * upgrade.fleeSpeed;
+                    const velocityY = Math.sin(fleeAngle) * upgrade.fleeSpeed;
+                    upgrade.setVelocity(velocityX, velocityY);
+                } else {
+                    // 천천히 랜덤하게 움직임
+                    const randomAngle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+                    const randomSpeed = 30;
+                    const velocityX = Math.cos(randomAngle) * randomSpeed;
+                    const velocityY = Math.sin(randomAngle) * randomSpeed;
+                    upgrade.setVelocity(velocityX, velocityY);
+                }
+                
+                // 월드 경계에서 튕김
+                if (upgrade.x < 50 || upgrade.x > this.worldWidth - 50) {
+                    upgrade.setVelocityX(-upgrade.body.velocity.x);
+                }
+                if (upgrade.y < 50 || upgrade.y > this.worldHeight - 50) {
+                    upgrade.setVelocityY(-upgrade.body.velocity.y);
+                }
+            }
+        });
+    }
+
+    updateGameTime() {
+        this.gameTime += 1;
+        
+        // 20초마다 난이도 증가
+        if (this.gameTime % 20 === 0) {
+            this.increaseDifficulty();
+        }
+    }
+
+    increaseDifficulty() {
+        this.difficultyLevel += 1;
+        
+        // 스폰 속도 증가 (최소 400ms)
+        this.enemySpawnRate = Math.max(400, 1200 - (this.difficultyLevel * 80));
+        
+        // 웨이브당 적 수 증가 (최대 4마리)
+        this.enemiesPerWave = Math.min(4, Math.floor(this.difficultyLevel / 3) + 1);
+        
+        // 적 기본 속도 증가
+        this.baseEnemySpeed = 100 + (this.difficultyLevel * 12);
+        
+        // 스폰 타이머 재설정
+        this.enemySpawnTimer.destroy();
+        this.enemySpawnTimer = this.time.addEvent({
+            delay: this.enemySpawnRate,
+            callback: this.spawnEnemyWave,
+            callbackScope: this,
+            loop: true
+        });
+        
+        console.log(`Difficulty increased! Level: ${this.difficultyLevel}, Spawn rate: ${this.enemySpawnRate}ms, Enemies per wave: ${this.enemiesPerWave}`);
+    }
+
+    updateUI() {
+        // 중앙 생존시간 업데이트
+        const minutes = Math.floor(this.gameTime / 60);
+        const seconds = this.gameTime % 60;
+        this.survivalTimeDisplay.setText(
+            String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0')
+        );
+        
+        this.difficultyText.setText('Wave: ' + this.difficultyLevel);
+        this.bulletCountText.setText('Bullets: ' + this.bulletCount);
+        
+        // 체력 업데이트
+        for (let i = 0; i < this.maxPlayerHealth; i++) {
+            if (i < this.playerHealth) {
+                this.healthDisplay[i].setColor('#ff0000');
+                this.healthDisplay[i].setAlpha(1);
+            } else {
+                this.healthDisplay[i].setColor('#666666');
+                this.healthDisplay[i].setAlpha(0.5);
+            }
+        }
+        
+        // 현대적인 대쉬 능력 UI 업데이트
+        for (let i = 0; i < this.maxDashCharges; i++) {
+            const ability = this.dashAbilities[i];
+            const { progress, icon, size, color } = ability;
+            
+            progress.clear();
+            
+            if (i < this.dashCharges) {
+                // 사용 가능 - 풀 차지 상태
+                icon.setColor(color).setAlpha(1);
+                
+                // 활성화된 외곽선
+                progress.lineStyle(3, Phaser.Display.Color.HexStringToColor(color).color, 0.8);
+                progress.strokeCircle(0, 0, size);
+                
+                // 내부 글로우 효과
+                progress.lineStyle(1, 0xffffff, 0.3);
+                progress.strokeCircle(0, 0, size - 3);
+                
+            } else {
+                // 쿨다운 중
+                const cooldownProgress = Math.max(0, 1 - (this.dashCooldowns[i] / this.dashCooldown));
+                icon.setColor('#666666').setAlpha(0.4 + (cooldownProgress * 0.6));
+                
+                // 진행률 호 (부드러운 그라데이션 효과)
+                if (cooldownProgress > 0) {
+                    const startAngle = -Math.PI / 2;
+                    const endAngle = startAngle + (cooldownProgress * Math.PI * 2);
+                    
+                    // 메인 진행률 호
+                    progress.lineStyle(4, Phaser.Display.Color.HexStringToColor(color).color, 0.9);
+                    progress.beginPath();
+                    progress.arc(0, 0, size, startAngle, endAngle);
+                    progress.strokePath();
+                    
+                    // 내부 하이라이트
+                    progress.lineStyle(2, 0xffffff, 0.4);
+                    progress.beginPath();
+                    progress.arc(0, 0, size - 2, startAngle, endAngle);
+                    progress.strokePath();
+                }
+            }
+        }
+        
+        // 현대적인 에너지 웨이브 UI 업데이트
+        const waveAbility = this.energyWaveUI;
+        const { progress: waveProgress, icon: waveIcon, size: waveSize, color: waveColor } = waveAbility;
+        
+        waveProgress.clear();
+        
+        if (this.lightningWaveReady) {
+            // 사용 가능 - 펄스 효과
+            waveIcon.setColor(waveColor).setAlpha(1);
+            
+            // 활성화된 외곽선 (펄스 효과)
+            const pulseAlpha = 0.6 + Math.sin(this.time.now * 0.008) * 0.2;
+            waveProgress.lineStyle(4, Phaser.Display.Color.HexStringToColor(waveColor).color, pulseAlpha);
+            waveProgress.strokeCircle(0, 0, waveSize);
+            
+            // 내부 글로우
+            waveProgress.lineStyle(2, 0xffffff, 0.4);
+            waveProgress.strokeCircle(0, 0, waveSize - 3);
+            
+        } else {
+            // 쿨다운 중
+            const currentTime = this.time.now;
+            const elapsed = currentTime - this.lightningWaveLastUsed;
+            const cooldownProgress = Math.max(0, elapsed / this.lightningWaveCooldown);
+            
+            waveIcon.setColor('#666666').setAlpha(0.4 + (cooldownProgress * 0.6));
+            
+            if (cooldownProgress > 0) {
+                const startAngle = -Math.PI / 2;
+                const endAngle = startAngle + (cooldownProgress * Math.PI * 2);
+                
+                // 메인 진행률 호 (더 두껍게)
+                waveProgress.lineStyle(5, Phaser.Display.Color.HexStringToColor(waveColor).color, 0.9);
+                waveProgress.beginPath();
+                waveProgress.arc(0, 0, waveSize, startAngle, endAngle);
+                waveProgress.strokePath();
+                
+                // 내부 하이라이트
+                waveProgress.lineStyle(3, 0xffffff, 0.5);
+                waveProgress.beginPath();
+                waveProgress.arc(0, 0, waveSize - 2, startAngle, endAngle);
+                waveProgress.strokePath();
+            }
+        }
+        
+        // 경험치 바 업데이트
+        const expProgress = (this.experience / this.experienceToNext) * 350;
+        this.expBar.width = Math.max(0, expProgress);
+        this.expText.setText(`${this.experience}/${this.experienceToNext} EXP`);
+    }
+
+    movePlayer(delta) {
+        if (this.isDashing) return;
+        
+        let accelerationX = 0;
+        let accelerationY = 0;
+
+        if (this.cursors.left.isDown || this.wasd.A.isDown) {
+            accelerationX = -this.playerAcceleration;
+        } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
+            accelerationX = this.playerAcceleration;
+        }
+
+        if (this.cursors.up.isDown || this.wasd.W.isDown) {
+            accelerationY = -this.playerAcceleration;
+        } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
+            accelerationY = this.playerAcceleration;
+        }
+
+        this.player.setAcceleration(accelerationX, accelerationY);
+    }
+
+    handleLightningWave(time) {
+        // 쿨다운 업데이트
+        if (!this.lightningWaveReady && time > this.lightningWaveLastUsed + this.lightningWaveCooldown) {
+            this.lightningWaveReady = true;
+        }
+        
+        // 스페이스바 입력 체크
+        if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && this.lightningWaveReady) {
+            this.performLightningWave();
+            this.lightningWaveReady = false;
+            this.lightningWaveLastUsed = time;
+        }
+    }
+
+    performLightningWave() {
+        const playerX = this.player.x;
+        const playerY = this.player.y;
+        
+        // 원형 기 분출 이펙트
+        this.createEnergyWaveEffect(playerX, playerY);
+        
+        // 강력한 화면 흔들림 (타격감만 공유)
+        this.cameras.main.shake(600, 0.08);
+        
+        // 주변 적들에게 강력한 넉백 적용
+        this.enemies.children.entries.forEach(enemy => {
+            if (enemy.active) {
+                const distance = Phaser.Math.Distance.Between(playerX, playerY, enemy.x, enemy.y);
+                
+                if (distance <= this.lightningWaveRadius) {
+                    // 매우 강한 넉백 (적이 완전히 밀려나도록)
+                    const angle = Phaser.Math.Angle.Between(playerX, playerY, enemy.x, enemy.y);
+                    const knockbackForce = 800; // 매우 강함
+                    enemy.knockbackX = Math.cos(angle) * knockbackForce;
+                    enemy.knockbackY = Math.sin(angle) * knockbackForce;
+                    
+                    // 피격 효과
+                    if (!enemy.isFlashing) {
+                        enemy.isFlashing = true;
+                        this.createHitFlashEffect(enemy);
+                    }
+                }
+            }
+        });
+    }
+
+    createEnergyWaveEffect(centerX, centerY) {
+        // 중심 에너지 코어
+        const energyCore = this.add.graphics();
+        energyCore.fillStyle(0x00ffff, 0.8);
+        energyCore.fillCircle(centerX, centerY, 15);
+        
+        // 메인 에너지 웨이브 (강한 청색)
+        const mainWave = this.add.graphics();
+        mainWave.lineStyle(6, 0x00ffff, 0.9);
+        mainWave.strokeCircle(centerX, centerY, 20);
+        
+        // 외곽 충격파 (밝은 청색)
+        const shockWave = this.add.graphics();
+        shockWave.lineStyle(10, 0x88ffff, 0.7);
+        shockWave.strokeCircle(centerX, centerY, 25);
+        
+        // 최외곽 파동 (연한 청색)
+        const outerWave = this.add.graphics();
+        outerWave.lineStyle(4, 0xaaffff, 0.5);
+        outerWave.strokeCircle(centerX, centerY, 30);
+        
+        // 동심원 확장 애니메이션
+        this.tweens.add({
+            targets: mainWave,
+            scaleX: 10,
+            scaleY: 10,
+            alpha: 0,
+            duration: 500,
+            ease: 'Power2.easeOut'
+        });
+        
+        this.tweens.add({
+            targets: shockWave,
+            scaleX: 8,
+            scaleY: 8,
+            alpha: 0,
+            duration: 400,
+            delay: 50,
+            ease: 'Power2.easeOut'
+        });
+        
+        this.tweens.add({
+            targets: outerWave,
+            scaleX: 6,
+            scaleY: 6,
+            alpha: 0,
+            duration: 350,
+            delay: 100,
+            ease: 'Power2.easeOut'
+        });
+        
+        // 중심 코어 펄스 효과
+        this.tweens.add({
+            targets: energyCore,
+            scaleX: 3,
+            scaleY: 3,
+            alpha: 0,
+            duration: 300,
+            ease: 'Power3.easeOut'
+        });
+        
+        // 모든 이펙트 정리
+        this.time.delayedCall(600, () => {
+            if (energyCore.active) energyCore.destroy();
+            if (mainWave.active) mainWave.destroy();
+            if (shockWave.active) shockWave.destroy();
+            if (outerWave.active) outerWave.destroy();
+        });
+    }
+
+    fireWeapon(time) {
+        if (time > this.lastFired + this.fireRate) {
+            const nearestEnemy = this.findNearestEnemyToPlayer();
+            
+            if (nearestEnemy && Phaser.Math.Distance.Between(
+                this.player.x, this.player.y, 
+                nearestEnemy.x, nearestEnemy.y
+            ) <= this.fireRange) {
+                
+                // 총알 개수에 따라 발사
+                const angleStep = (Math.PI * 2) / this.bulletCount;
+                const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, nearestEnemy.x, nearestEnemy.y);
+                
+                for (let i = 0; i < this.bulletCount; i++) {
+                    let bulletAngle;
+                    if (this.bulletCount === 1) {
+                        bulletAngle = baseAngle;
+                    } else {
+                        const offset = (i - (this.bulletCount - 1) / 2) * 0.15; // 0.3에서 0.15로 절반 감소
+                        bulletAngle = baseAngle + offset;
+                    }
+                    
+                    const offsetDistance = this.bulletCount > 1 ? 20 : 0;
+                    const offsetX = Math.cos(bulletAngle + Math.PI / 2) * offsetDistance * (i - (this.bulletCount - 1) / 2);
+                    const offsetY = Math.sin(bulletAngle + Math.PI / 2) * offsetDistance * (i - (this.bulletCount - 1) / 2);
+                    
+                    this.createBulletWithAngle(
+                        this.player.x + offsetX, 
+                        this.player.y + offsetY, 
+                        bulletAngle
+                    );
+                }
+                
+                this.lastFired = time;
+            }
+        }
+    }
+
+    createBulletWithAngle(x, y, angle) {
+        const bullet = this.physics.add.sprite(x, y, 'bullet');
+        this.bullets.add(bullet);
+        
+        const velocityX = Math.cos(angle) * this.bulletSpeed;
+        const velocityY = Math.sin(angle) * this.bulletSpeed;
+        bullet.setVelocity(velocityX, velocityY);
+    }
+
+    createBullet(x, y, target) {
+        const bullet = this.physics.add.sprite(x, y, 'bullet');
+        this.bullets.add(bullet);
+        
+        const angle = Phaser.Math.Angle.Between(x, y, target.x, target.y);
+        const velocityX = Math.cos(angle) * this.bulletSpeed;
+        const velocityY = Math.sin(angle) * this.bulletSpeed;
+        bullet.setVelocity(velocityX, velocityY);
+    }
+
+    spawnEnemyWave() {
+        for (let i = 0; i < this.enemiesPerWave; i++) {
+            this.time.delayedCall(i * 150, () => {
+                this.spawnEnemy();
+            });
+        }
+    }
+
+    spawnEnemy() {
+        // 플레이어 주변 범위에서 스폰
+        const spawnRadius = 600;
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const distance = Phaser.Math.FloatBetween(spawnRadius, spawnRadius + 200);
+        
+        const x = this.player.x + Math.cos(angle) * distance;
+        const y = this.player.y + Math.sin(angle) * distance;
+        
+        // 월드 경계 내에서만 스폰
+        const clampedX = Phaser.Math.Clamp(x, 50, this.worldWidth - 50);
+        const clampedY = Phaser.Math.Clamp(y, 50, this.worldHeight - 50);
+        
+        const difficultyMultiplier = 1 + (this.difficultyLevel * 0.15);
+        const enemyTypes = ['enemy1', 'enemy2', 'enemy3'];
+        const enemyType = enemyTypes[Phaser.Math.Between(0, 2)];
+        
+        const enemy = this.physics.add.sprite(clampedX, clampedY, enemyType);
+        enemy.enemyType = enemyType;
+        enemy.health = this.getEnemyHealth(enemyType) * Math.ceil(difficultyMultiplier);
+        enemy.maxHealth = enemy.health;
+        enemy.speed = this.getEnemySpeed(enemyType) * (0.9 + Math.random() * 0.2) * difficultyMultiplier;
+        enemy.isHit = false;
+        enemy.isFlashing = false;
+        enemy.knockbackX = 0;
+        enemy.knockbackY = 0;
+        
+        this.enemies.add(enemy);
+    }
+
+    getEnemyHealth(type) {
+        switch(type) {
+            case 'enemy1': return 1;
+            case 'enemy2': return 2;
+            case 'enemy3': return 3;
+            case 'elite_monster': return 50;
+            default: return 1;
+        }
+    }
+
+    getEnemySpeed(type) {
+        switch(type) {
+            case 'enemy1': return this.baseEnemySpeed;
+            case 'enemy2': return this.baseEnemySpeed * 1.3;
+            case 'enemy3': return this.baseEnemySpeed * 0.8;
+            case 'elite_monster': return this.baseEnemySpeed * 0.3;
+            default: return this.baseEnemySpeed;
+        }
+    }
+
+    moveEnemies(delta) {
+        this.enemies.children.entries.forEach(enemy => {
+            if (enemy.active) {
+                const baseAngle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+                
+                let wobble = 0;
+                if (enemy.enemyType !== 'elite_monster') {
+                    wobble = Math.sin(this.time.now * 0.003 + enemy.x * 0.01) * 0.2;
+                } else {
+                    // 엘리트 몬스터는 더 천천히, 직선적으로 이동
+                    wobble = Math.sin(this.time.now * 0.001 + enemy.x * 0.005) * 0.1;
+                }
+                
+                const angle = baseAngle + wobble;
+                
+                let velocityX = Math.cos(angle) * enemy.speed;
+                let velocityY = Math.sin(angle) * enemy.speed;
+                
+                // 바둑알처럼 강한 넉백 슬라이드 효과
+                if (enemy.knockbackX !== 0 || enemy.knockbackY !== 0) {
+                    velocityX += enemy.knockbackX;
+                    velocityY += enemy.knockbackY;
+                    
+                    // 바둑알처럼 더 천천히 감속 (더 멀리 밀려남)
+                    enemy.knockbackX *= 0.92;
+                    enemy.knockbackY *= 0.92;
+                    
+                    if (Math.abs(enemy.knockbackX) < 1) enemy.knockbackX = 0;
+                    if (Math.abs(enemy.knockbackY) < 1) enemy.knockbackY = 0;
+                }
+                
+                enemy.setVelocity(velocityX, velocityY);
+                
+                // 엘리트 몬스터 체력바 업데이트
+                if (enemy.enemyType === 'elite_monster' && enemy.healthBar) {
+                    enemy.healthBarBg.x = enemy.x;
+                    enemy.healthBarBg.y = enemy.y - 80;
+                    
+                    const healthPercent = enemy.health / enemy.maxHealth;
+                    enemy.healthBar.width = 120 * healthPercent;
+                    enemy.healthBar.x = enemy.x - 60;
+                    enemy.healthBar.y = enemy.y - 80;
+                    
+                    enemy.nameTag.x = enemy.x;
+                    enemy.nameTag.y = enemy.y - 100;
+                }
+                
+                // isHit 처리는 createHitFlashEffect에서 자동 처리됨
+            }
+        });
+    }
+
+    moveBullets() {
+        this.bullets.children.entries.forEach(bullet => {
+            if (bullet.active) {
+                const distance = Phaser.Math.Distance.Between(this.player.x, this.player.y, bullet.x, bullet.y);
+                if (distance > 800) {
+                    bullet.destroy();
+                }
+            }
+        });
+    }
+
+    moveEnergy() {
+        this.energy.children.entries.forEach(energyOrb => {
+            if (energyOrb.active) {
+                const distance = Phaser.Math.Distance.Between(this.player.x, this.player.y, energyOrb.x, energyOrb.y);
+                if (distance < 150) {
+                    const angle = Phaser.Math.Angle.Between(energyOrb.x, energyOrb.y, this.player.x, this.player.y);
+                    const attractForce = 500 + (150 - distance) * 10;
+                    const velocityX = Math.cos(angle) * attractForce;
+                    const velocityY = Math.sin(angle) * attractForce;
+                    energyOrb.setVelocity(velocityX, velocityY);
+                } else {
+                    energyOrb.setVelocity(0, 0);
+                }
+            }
+        });
+    }
+
+    updateExplosions() {
+        this.explosions.children.entries.forEach(explosion => {
+            if (explosion.active) {
+                explosion.scaleX += 0.08;
+                explosion.scaleY += 0.08;
+                explosion.alpha -= 0.06;
+                
+                if (explosion.alpha <= 0) {
+                    explosion.destroy();
+                }
+            }
+        });
+    }
+
+    findNearestEnemyToPlayer() {
+        let nearestEnemy = null;
+        let nearestDistance = Infinity;
+        
+        this.enemies.children.entries.forEach(enemy => {
+            if (enemy.active) {
+                const distance = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestEnemy = enemy;
+                }
+            }
+        });
+        
+        return nearestEnemy;
+    }
+
+    hitEnemy(bullet, enemy) {
+        this.createExplosion(enemy.x, enemy.y);
+        
+        enemy.health -= 1;
+        
+        // 피격 효과가 이미 실행 중이 아닐 때만 실행
+        if (!enemy.isFlashing) {
+            enemy.isFlashing = true;
+            this.createHitFlashEffect(enemy);
+        }
+        
+        // 바둑알처럼 강한 넉백 효과
+        const knockbackForce = enemy.enemyType === 'elite_monster' ? 100 : 200;
+        const angle = Phaser.Math.Angle.Between(bullet.x, bullet.y, enemy.x, enemy.y);
+        enemy.knockbackX = Math.cos(angle) * knockbackForce;
+        enemy.knockbackY = Math.sin(angle) * knockbackForce;
+        
+        bullet.destroy();
+        
+        if (enemy.health <= 0) {
+            // 엘리트 몬스터 특별 처리
+            if (enemy.enemyType === 'elite_monster') {
+                // 체력바와 태그 제거
+                if (enemy.healthBarBg) enemy.healthBarBg.destroy();
+                if (enemy.healthBar) enemy.healthBar.destroy();
+                if (enemy.nameTag) enemy.nameTag.destroy();
+                
+                // 더 많은 에너지 드롭
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    const distance = 60;
+                    const energyX = enemy.x + Math.cos(angle) * distance;
+                    const energyY = enemy.y + Math.sin(angle) * distance;
+                    
+                    const energyOrb = this.physics.add.sprite(energyX, energyY, 'energy');
+                    this.energy.add(energyOrb);
+                }
+                
+                // 엘리트 죽음 효과
+                this.cameras.main.shake(800, 0.05);
+                for (let i = 0; i < 5; i++) {
+                    this.time.delayedCall(i * 100, () => {
+                        this.createExplosion(
+                            enemy.x + (Math.random() - 0.5) * 100,
+                            enemy.y + (Math.random() - 0.5) * 100
+                        );
+                    });
+                }
+            } else {
+                const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                this.energy.add(energyOrb);
+            }
+            
+            enemy.destroy();
+            
+            const points = this.getEnemyPoints(enemy.enemyType);
+            this.score += points;
+            
+            // 엘리트 킬 카운트
+            if (enemy.enemyType === 'elite_monster') {
+                this.eliteKills++;
+            }
+        }
+    }
+
+    getEnemyPoints(type) {
+        switch(type) {
+            case 'enemy1': return 10;
+            case 'enemy2': return 20;
+            case 'enemy3': return 30;
+            case 'elite_monster': return 500;
+            default: return 10;
+        }
+    }
+
+    createHitFlashEffect(enemy) {
+        // 깜빡깜빡 효과 (3번 깜빡)
+        const flashCount = 6;
+        const flashDuration = 80;
+        
+        for (let i = 0; i < flashCount; i++) {
+            this.time.delayedCall(i * flashDuration, () => {
+                if (enemy.active && enemy.isFlashing) {
+                    if (i % 2 === 0) {
+                        enemy.setTint(0xffffff); // 흰색
+                    } else {
+                        enemy.clearTint(); // 원래 색상
+                    }
+                }
+            });
+        }
+        
+        // 마지막에 원래 색상으로 복원하고 플래시 상태 해제
+        this.time.delayedCall(flashCount * flashDuration, () => {
+            if (enemy.active) {
+                enemy.clearTint();
+                enemy.isFlashing = false;
+            }
+        });
+    }
+
+    createExplosion(x, y) {
+        const explosion = this.add.sprite(x, y, 'explosion');
+        explosion.setScale(0.1);
+        explosion.setAlpha(1);
+        this.explosions.add(explosion);
+    }
+
+    shakeCamera(duration, intensity) {
+        this.cameras.main.shake(duration, intensity);
+    }
+
+    collectEnergy(player, energyOrb) {
+        energyOrb.destroy();
+        
+        this.experience += 20;
+        
+        // 번개 파동파 쿨타임 0.1초 감소
+        if (!this.lightningWaveReady) {
+            this.lightningWaveCooldown -= 100; // 0.1초 = 100ms
+            // 최소 1초는 유지
+            if (this.lightningWaveCooldown < 1000) {
+                this.lightningWaveCooldown = 1000;
+            }
+        }
+        
+        if (this.experience >= this.experienceToNext) {
+            this.levelUp();
+        }
+    }
+
+    collectBulletUpgrade(player, bulletUpgrade) {
+        bulletUpgrade.destroy();
+        
+        // 탄환 개수 증가
+        this.bulletCount += 1;
+        
+        // 특별한 이펙트
+        this.shakeCamera(200, 0.015);
+        this.createExplosion(player.x, player.y);
+        
+        // 사운드 효과 대신 시각적 피드백
+        this.tweens.add({
+            targets: this.bulletCountText,
+            scaleX: 1.5,
+            scaleY: 1.5,
+            duration: 200,
+            yoyo: true,
+            ease: 'Power2'
+        });
+        
+        console.log(`Bullet upgrade collected! New bullet count: ${this.bulletCount}`);
+    }
+
+    levelUp() {
+        if (this.weaponLevel < 10) { // 최대 레벨 증가
+            this.weaponLevel += 1;
+            this.experience = 0;
+            this.experienceToNext = 100 + (this.weaponLevel * 75);
+            this.fireRate = Math.max(80, 200 - (this.weaponLevel - 1) * 15);
+            this.fireRange = Math.min(500, 300 + (this.weaponLevel - 1) * 30);
+            
+            // 레벨업 이펙트 (화면 흔들림 포함)
+            this.shakeCamera(300, 0.02);
+            this.createExplosion(this.player.x, this.player.y);
+        }
+    }
+
+    playerHit(player, enemy) {
+        // 대쉬 중에는 피격 무시
+        if (this.isDashing) {
+            enemy.destroy();
+            return;
+        }
+        
+        this.playerHealth -= 1;
+        
+        // 피격시에만 화면 흔들림!
+        this.shakeCamera(500, 0.04);
+        this.createExplosion(player.x, player.y);
+        
+        // 무적 시간
+        player.setTint(0xff0000);
+        player.setAlpha(0.5);
+        
+        this.time.delayedCall(1500, () => {
+            if (player.active) {
+                player.setTint(0xffffff);
+                player.setAlpha(1);
+            }
+        });
+        
+        if (this.playerHealth <= 0) {
+            this.gameOver();
+        } else {
+            // 적을 밀어내기
+            enemy.destroy();
+        }
+    }
+
+    gameOver() {
+        this.scene.pause();
+        this.scene.launch('GameOverScene', { 
+            score: this.score, 
+            time: this.gameTime,
+            level: this.weaponLevel,
+            wave: this.difficultyLevel,
+            bulletCount: this.bulletCount,
+            eliteKills: this.eliteKills
+        });
+    }
+}
+
+class GameOverScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'GameOverScene' });
+    }
+
+    init(data) {
+        this.finalScore = data.score;
+        this.finalTime = data.time;
+        this.finalLevel = data.level;
+        this.finalWave = data.wave;
+        this.finalBulletCount = data.bulletCount;
+        this.finalEliteKills = data.eliteKills;
+    }
+
+    create() {
+        // 검은색 반투명 전체 배경
+        const overlay = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.85);
+        
+        // 게임오버 메인 텍스트
+        const gameOverText = this.add.text(400, 150, 'GAME OVER', {
+            fontSize: '64px',
+            color: '#ff4444',
+            stroke: '#000000',
+            strokeThickness: 4,
+            fontWeight: 'bold'
+        }).setOrigin(0.5).setAlpha(0);
+        
+        // 게임오버 텍스트 애니메이션
+        this.tweens.add({
+            targets: gameOverText,
+            alpha: 1,
+            scaleX: 1.1,
+            scaleY: 1.1,
+            duration: 800,
+            ease: 'Power2.easeOut'
+        });
+        
+        // 통계 컨테이너
+        const statsContainer = this.add.container(400, 280);
+        
+        // 간단한 통계 표시
+        const mainStats = [
+            `Score: ${this.finalScore.toLocaleString()}`,
+            `Time: ${Math.floor(this.finalTime / 60)}m ${this.finalTime % 60}s`,
+            `Wave: ${this.finalWave}   Bullets: ${this.finalBulletCount}   Elites: ${this.finalEliteKills}`
+        ];
+        
+        mainStats.forEach((stat, index) => {
+            const statText = this.add.text(0, index * 30, stat, {
+                fontSize: index === 2 ? '16px' : '22px',
+                color: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0.5).setAlpha(0);
+            
+            statsContainer.add(statText);
+            
+            // 통계 텍스트 페이드인 애니메이션
+            this.tweens.add({
+                targets: statText,
+                alpha: 1,
+                duration: 600,
+                delay: 400 + (index * 200)
+            });
+        });
+        
+        // 큰 Replay 버튼
+        const replayButton = this.add.rectangle(400, 450, 200, 60, 0x4CAF50, 0.9);
+        replayButton.setStrokeStyle(3, 0xffffff);
+        replayButton.setInteractive();
+        replayButton.setAlpha(0);
+        
+        const replayText = this.add.text(400, 450, 'REPLAY', {
+            fontSize: '28px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3,
+            fontWeight: 'bold'
+        }).setOrigin(0.5).setAlpha(0);
+        
+        // Replay 버튼 애니메이션
+        this.tweens.add({
+            targets: [replayButton, replayText],
+            alpha: 1,
+            duration: 600,
+            delay: 1200
+        });
+        
+        // 작은 안내 텍스트
+        const hintText = this.add.text(400, 520, 'Press SPACE or click REPLAY', {
+            fontSize: '16px',
+            color: '#aaaaaa',
+            stroke: '#000000',
+            strokeThickness: 1
+        }).setOrigin(0.5).setAlpha(0);
+        
+        this.tweens.add({
+            targets: hintText,
+            alpha: 1,
+            duration: 600,
+            delay: 1400
+        });
+        
+        // 버튼 이벤트
+        const restartGame = () => {
+            this.scene.stop();
+            this.scene.stop('GameScene');
+            this.scene.start('GameScene');
+        };
+        
+        replayButton.on('pointerdown', restartGame);
+        
+        // 호버 효과
+        replayButton.on('pointerover', () => {
+            replayButton.setFillStyle(0x66BB6A, 1);
+            this.tweens.add({
+                targets: [replayButton, replayText],
+                scaleX: 1.05,
+                scaleY: 1.05,
+                duration: 150,
+                ease: 'Power2.easeOut'
+            });
+        });
+        
+        replayButton.on('pointerout', () => {
+            replayButton.setFillStyle(0x4CAF50, 0.9);
+            this.tweens.add({
+                targets: [replayButton, replayText],
+                scaleX: 1,
+                scaleY: 1,
+                duration: 150,
+                ease: 'Power2.easeOut'
+            });
+        });
+        
+        // 스페이스바로도 재시작
+        this.input.keyboard.once('keydown-SPACE', restartGame);
+        
+        // 마우스 클릭으로도 재시작 (아무 곳이나)
+        this.input.once('pointerdown', restartGame);
+    }
+}
+
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: '#0a0a1a',
+    parent: 'game-container',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            debug: false,
+            gravity: { y: 0 }
+        }
+    },
+    scene: [GameScene, GameOverScene]
+};
+
+const game = new Phaser.Game(config);
