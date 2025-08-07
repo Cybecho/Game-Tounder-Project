@@ -80,6 +80,10 @@ class GameScene extends Phaser.Scene {
         this.lightningWaveReady = true;
         this.lightningWaveLastUsed = 0;
         this.lightningWaveRadius = 800; // 800x800 범위 (4배 확대)
+        this.isLightningWaveActive = false; // 스킬 사용 중 무적 상태
+        
+        // 레벨업 시스템 보호 플래그들
+        this.isLevelingUp = false; // 레벨업 진행 중 중복 방지
     }
 
     preload() {
@@ -179,6 +183,7 @@ class GameScene extends Phaser.Scene {
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys('W,S,A,D');
         this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        this.lKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
         
         // 마우스 클릭 이벤트 추가
         this.input.on('pointerdown', this.onPointerDown, this);
@@ -773,6 +778,11 @@ class GameScene extends Phaser.Scene {
     }
 
     update(time, delta) {
+        // L키로 레벨업 치트 (테스트용)
+        if (Phaser.Input.Keyboard.JustDown(this.lKey)) {
+            this.levelUp();
+        }
+        
         this.movePlayer(delta);
         this.fireWeapon(time);
         this.handleLightningWave(time);
@@ -1004,157 +1014,101 @@ class GameScene extends Phaser.Scene {
     }
 
     performLightningWave() {
+        // 스킬이 이미 활성 상태이면 중복 실행 방지
+        if (this.isLightningWaveActive) {
+            console.log('Lightning wave already active, skipping...'); // 디버그용
+            return;
+        }
+        
         const playerX = this.player.x;
         const playerY = this.player.y;
         
-        // 원형 기 분출 이펙트
-        this.createEnergyWaveEffect(playerX, playerY);
+        console.log('Lightning wave activated'); // 디버그용
         
-        // 적당한 화면 흔들림 (과도하지 않게 조정)
-        this.cameras.main.shake(300, 0.04);
+        // 스킬 사용 중 잠깐 무적 상태
+        this.isLightningWaveActive = true;
         
-        // 주변 적들에게 강력한 넉백 적용
+        // 대쉬와 동일한 강력한 화면 플래시 효과
+        const flashRect = this.add.rectangle(400, 300, 800, 600, 0xffffff, 1.0).setScrollFactor(0);
+        this.tweens.add({
+            targets: flashRect,
+            alpha: 0,
+            duration: 100,
+            onComplete: () => flashRect.destroy()
+        });
+        
+        // 원형 밀쳐내기 이펙트 애니메이션
+        this.createPushWaveEffect(playerX, playerY);
+        
+        // 가벼운 화면 흔들림
+        this.cameras.main.shake(200, 0.03);
+        
+        // 반경 내 적들을 즉시 넉백
         this.enemies.children.entries.forEach(enemy => {
             if (enemy.active) {
                 const distance = Phaser.Math.Distance.Between(playerX, playerY, enemy.x, enemy.y);
                 
                 if (distance <= this.lightningWaveRadius) {
-                    // 극적이고 강력한 넉백 효과
                     const angle = Phaser.Math.Angle.Between(playerX, playerY, enemy.x, enemy.y);
-                    const knockbackForce = 1600; // 최대 파워
+                    
+                    // 강화된 넉백력 - 더 멀리 밀쳐냄
+                    const knockbackForce = 1400;
                     enemy.knockbackX = Math.cos(angle) * knockbackForce;
                     enemy.knockbackY = Math.sin(angle) * knockbackForce;
                     
-                    // 적의 극적인 튕겨나가는 효과
-                    enemy.setTint(0xffffff); // 흰색으로 번쩍
-                    this.tweens.add({
-                        targets: enemy,
-                        scaleX: 1.3,
-                        scaleY: 1.3,
-                        duration: 100,
-                        yoyo: true,
-                        ease: 'Power2.easeOut'
+                    // 약간의 데미지
+                    enemy.health -= 1;
+                    
+                    // 간단한 피격 효과
+                    enemy.setTint(0xffcccc);
+                    this.time.delayedCall(200, () => {
+                        if (enemy.active) {
+                            enemy.clearTint();
+                        }
                     });
                     
-                    // 피격 효과와 스핀 효과
-                    if (!enemy.isFlashing) {
-                        enemy.isFlashing = true;
-                        this.createHitFlashEffect(enemy);
+                    // 적이 죽었으면 처리
+                    if (enemy.health <= 0) {
+                        this.createExplosion(enemy.x, enemy.y);
+                        const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                        this.energy.add(energyOrb);
+                        enemy.destroy();
                         
-                        // 회전 효과로 튕겨나가는 느낌 강화
-                        enemy.setAngularVelocity(Phaser.Math.Between(-500, 500));
-                        
-                        // 일정 시간 후 색상과 회전 복구
-                        this.time.delayedCall(500, () => {
-                            if (enemy.active) {
-                                enemy.clearTint();
-                                enemy.setAngularVelocity(0);
-                                enemy.setRotation(0);
-                            }
-                        });
+                        const points = this.getEnemyPoints(enemy.enemyType);
+                        this.score += points;
                     }
                 }
             }
         });
+        
+        // 0.3초 후 무적 해제
+        this.time.delayedCall(300, () => {
+            this.isLightningWaveActive = false;
+        });
     }
 
-    createEnergyWaveEffect(centerX, centerY) {
-        // 매우 큰 중심 기 폭발 효과 (5배 크기)
-        const energyBurst = this.add.graphics();
-        energyBurst.fillStyle(0xffffff, 0.95);
-        energyBurst.fillCircle(centerX, centerY, 40); // 8 * 5
+    createPushWaveEffect(centerX, centerY) {
+        // 단일 원형 파동 이펙트 - 깔끔하고 간단하게
+        const waveRing = this.add.graphics();
+        waveRing.x = centerX;
+        waveRing.y = centerY;
+        waveRing.lineStyle(8, 0xffffff, 0.9);
+        waveRing.strokeCircle(0, 0, 30);
         
-        const innerCore = this.add.graphics();
-        innerCore.fillStyle(0x00ffff, 0.85);
-        innerCore.fillCircle(centerX, centerY, 60); // 12 * 5
-        
-        const outerCore = this.add.graphics();
-        outerCore.fillStyle(0x4488ff, 0.7);
-        outerCore.fillCircle(centerX, centerY, 80); // 16 * 5
-        
-        // 거대한 원형 기 분출 웨이브 (5배 크기)
-        const primaryWave = this.add.graphics();
-        primaryWave.lineStyle(20, 0x00ffff, 0.9); // 8 * 2.5
-        primaryWave.strokeCircle(centerX, centerY, 90); // 18 * 5
-        
-        const secondaryWave = this.add.graphics();
-        secondaryWave.lineStyle(15, 0xffffff, 0.8); // 6 * 2.5
-        secondaryWave.strokeCircle(centerX, centerY, 110); // 22 * 5
-        
-        const outerWave = this.add.graphics();
-        outerWave.lineStyle(10, 0x88ddff, 0.6); // 4 * 2.5
-        outerWave.strokeCircle(centerX, centerY, 130); // 26 * 5
-        
-        // 부드럽고 쫀득한 확산 애니메이션
+        // 파동 확산 애니메이션
         this.tweens.add({
-            targets: primaryWave,
-            scaleX: 15, // 더 큰 스케일
-            scaleY: 15,
-            alpha: 0,
-            duration: 600, // 더 길게
-            ease: 'Cubic.easeOut' // 더 부드러운 곡선
-        });
-        
-        this.tweens.add({
-            targets: secondaryWave,
-            scaleX: 12,
-            scaleY: 12,
-            alpha: 0,
-            duration: 550,
-            delay: 50,
-            ease: 'Cubic.easeOut'
-        });
-        
-        this.tweens.add({
-            targets: outerWave,
-            scaleX: 10,
-            scaleY: 10,
-            alpha: 0,
-            duration: 500,
-            delay: 100,
-            ease: 'Cubic.easeOut'
-        });
-        
-        // 중심부 매우 부드러운 펄스 효과
-        this.tweens.add({
-            targets: energyBurst,
-            scaleX: 6, // 더 큰 확장
+            targets: waveRing,
+            scaleX: 6,
             scaleY: 6,
             alpha: 0,
             duration: 400,
-            ease: 'Cubic.easeOut'
-        });
-        
-        this.tweens.add({
-            targets: innerCore,
-            scaleX: 5,
-            scaleY: 5,
-            alpha: 0,
-            duration: 450,
-            delay: 30,
-            ease: 'Cubic.easeOut'
-        });
-        
-        this.tweens.add({
-            targets: outerCore,
-            scaleX: 4,
-            scaleY: 4,
-            alpha: 0,
-            duration: 500,
-            delay: 60,
-            ease: 'Cubic.easeOut'
-        });
-        
-        // 이펙트 정리
-        this.time.delayedCall(700, () => {
-            if (energyBurst.active) energyBurst.destroy();
-            if (innerCore.active) innerCore.destroy();
-            if (outerCore.active) outerCore.destroy();
-            if (primaryWave.active) primaryWave.destroy();
-            if (secondaryWave.active) secondaryWave.destroy();
-            if (outerWave.active) outerWave.destroy();
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                if (waveRing.active) waveRing.destroy();
+            }
         });
     }
+    
 
     fireWeapon(time) {
         if (time > this.lastFired + this.fireRate) {
@@ -1537,22 +1491,78 @@ class GameScene extends Phaser.Scene {
     }
 
     levelUp() {
-        if (this.weaponLevel < 10) { // 최대 레벨 증가
-            this.weaponLevel += 1;
-            this.experience = 0;
-            this.experienceToNext = 100 + (this.weaponLevel * 75);
-            this.fireRate = Math.max(80, 200 - (this.weaponLevel - 1) * 15);
-            this.fireRange = Math.min(500, 300 + (this.weaponLevel - 1) * 30);
-            
-            // 레벨업 이펙트 (화면 흔들림 포함)
-            this.shakeCamera(300, 0.02);
-            this.createExplosion(this.player.x, this.player.y);
+        // 레벨업이 이미 진행 중이면 중복 실행 방지
+        if (this.isLevelingUp || this.weaponLevel >= 10) {
+            return;
         }
+        
+        // 레벨업 시작 - 중복 실행 방지 플래그 설정
+        this.isLevelingUp = true;
+        
+        this.weaponLevel += 1;
+        this.experience = 0;
+        this.experienceToNext = 100 + (this.weaponLevel * 75);
+        this.fireRate = Math.max(80, 200 - (this.weaponLevel - 1) * 15);
+        this.fireRange = Math.min(500, 300 + (this.weaponLevel - 1) * 30);
+        
+        console.log(`Level Up! New level: ${this.weaponLevel}`); // 디버그용
+        
+        // 새로운 레벨업 연출
+        this.performLevelUpSequence();
+    }
+
+    performLevelUpSequence() {
+        // 1. 파동파 스킬 강제 발동 (쿨타임 무시)
+        this.performLightningWave();
+        
+        // 2. 간단한 레벨업 메시지
+        this.showLevelUpText();
+        
+        // 3. 레벨업 완료
+        this.completeLevelUpSequence();
+    }
+
+    completeLevelUpSequence() {
+        // 레벨업 프로세스 완전 완료
+        this.isLevelingUp = false;
+        console.log('Level up sequence completed'); // 디버그용
+    }
+
+    showLevelUpText() {
+        // 간단한 Level Up! 텍스트
+        const levelUpText = this.add.text(400, 300, `LEVEL ${this.weaponLevel}!`, {
+            fontSize: '48px',
+            fontFamily: 'Arial, sans-serif',
+            fill: '#FFD700',
+            fontStyle: 'bold',
+            stroke: '#000000',
+            strokeThickness: 3
+        }).setOrigin(0.5).setScrollFactor(0);
+        
+        // 부드러운 등장과 사라짐 애니메이션
+        this.tweens.add({
+            targets: levelUpText,
+            scaleX: 1.2,
+            scaleY: 1.2,
+            duration: 200,
+            ease: 'Back.easeOut',
+            yoyo: true,
+            repeat: 1,
+            onComplete: () => {
+                this.tweens.add({
+                    targets: levelUpText,
+                    alpha: 0,
+                    duration: 1000,
+                    delay: 500,
+                    onComplete: () => levelUpText.destroy()
+                });
+            }
+        });
     }
 
     playerHit(player, enemy) {
-        // 대쉬 중에는 피격 무시
-        if (this.isDashing) {
+        // 대쉬 중이나 번개 파동파 사용 중에는 피격 무시
+        if (this.isDashing || this.isLightningWaveActive) {
             enemy.destroy();
             return;
         }
