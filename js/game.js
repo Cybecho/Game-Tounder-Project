@@ -216,9 +216,11 @@ class GameScene extends Phaser.Scene {
         this.lastBulletUpgradeSpawn = 0;
         
         // 엘리트 몬스터 시스템
-        this.eliteSpawnRate = 35000; // 45초에서 35초로 단축
-        this.eliteSpawnChance = 0.20; // 15%에서 20%로 증가
+        this.eliteSpawnRate = 30000; // 30초로 대폭 단축
+        this.eliteSpawnChance = 0.70; // 70%로 대폭 증가
         this.lastEliteSpawn = 0;
+        this.currentEliteCount = 0; // 현재 맵에 있는 엘리트 몬스터 수
+        this.maxEliteCount = 1; // 최대 엘리트 몬스터 수 (10웨이브 이후 2마리)
         
         // 번개 파동파 시스템
         this.lightningWaveCooldown = 15000; // 15초 쿨다운
@@ -313,6 +315,14 @@ class GameScene extends Phaser.Scene {
         this.load.image('enemy_bullet', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
             <svg width="6" height="6" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="3" cy="3" r="2" fill="#FF1744" stroke="#B71C1C" stroke-width="1"/>
+            </svg>
+        `));
+        
+        this.load.image('star_elite_monster', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="60" height="60" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="30,5 35,20 50,20 38,30 43,45 30,35 17,45 22,30 10,20 25,20" fill="#FFD700" stroke="#FF8F00" stroke-width="3"/>
+                <polygon points="30,10 33,18 40,18 35,23 37,30 30,26 23,30 25,23 20,18 27,18" fill="#FFF176"/>
+                <circle cx="30" cy="25" r="4" fill="#FF6F00"/>
             </svg>
         `));
     }
@@ -864,9 +874,19 @@ class GameScene extends Phaser.Scene {
     }
 
     trySpawnEliteMonster() {
-        // 낮은 확률로 엘리트 몬스터 스폰
+        // 엘리트 몬스터 수 제한 체크
+        if (this.currentEliteCount >= this.maxEliteCount) {
+            return;
+        }
+        
+        // 높은 확률로 엘리트 몬스터 스폰
         if (Math.random() < this.eliteSpawnChance) {
-            this.spawnEliteMonster();
+            // 50% 확률로 일반 엘리트 또는 스타 엘리트 스폰
+            if (Math.random() < 0.5) {
+                this.spawnEliteMonster();
+            } else {
+                this.spawnStarEliteMonster();
+            }
         }
     }
 
@@ -911,8 +931,9 @@ class GameScene extends Phaser.Scene {
         this.createEliteHealthBar(eliteMonster);
         
         this.enemies.add(eliteMonster);
+        this.currentEliteCount++;
         
-        console.log('Elite monster spawned!');
+        console.log(`Elite monster spawned! Current elite count: ${this.currentEliteCount}`);
     }
     
     spawnPentagonMonster() {
@@ -956,8 +977,63 @@ class GameScene extends Phaser.Scene {
         
         console.log(`Pentagon monster #${this.pentagonCount} spawned at (${clampedX}, ${clampedY}) with ${pentagonMonster.health} health`);
     }
+    
+    spawnStarEliteMonster() {
+        // 플레이어로부터 멀리 스폰
+        const spawnRadius = 1000;
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const distance = Phaser.Math.FloatBetween(spawnRadius, spawnRadius + 400);
+        
+        const x = this.player.x + Math.cos(angle) * distance;
+        const y = this.player.y + Math.sin(angle) * distance;
+        
+        // 월드 경계 내에서만 스폰
+        const clampedX = Phaser.Math.Clamp(x, 100, this.worldWidth - 100);
+        const clampedY = Phaser.Math.Clamp(y, 100, this.worldHeight - 100);
+        
+        const starEliteMonster = this.physics.add.sprite(clampedX, clampedY, 'star_elite_monster');
+        starEliteMonster.enemyType = 'star_elite_monster';
+        starEliteMonster.health = 45; // 엘리트보다 약간 적은 체력
+        starEliteMonster.maxHealth = starEliteMonster.health;
+        starEliteMonster.speed = this.baseEnemySpeed * 0.4; // 느린 기본 속도
+        starEliteMonster.isHit = false;
+        starEliteMonster.isFlashing = false;
+        starEliteMonster.knockbackX = 0;
+        starEliteMonster.knockbackY = 0;
+        starEliteMonster.isElite = true;
+        starEliteMonster.isStarElite = true;
+        
+        // 대시 시스템
+        starEliteMonster.isDashing = false;
+        starEliteMonster.dashSpeed = 800; // 빠른 대시 속도
+        starEliteMonster.lastDash = this.time.now;
+        starEliteMonster.dashCooldown = Phaser.Math.Between(3000, 10000); // 3-10초 랜덤
+        starEliteMonster.dashDuration = 300; // 0.3초 대시
+        starEliteMonster.dashDirection = { x: 0, y: 0 };
+        
+        // 크기 조정
+        starEliteMonster.setScale(0.8);
+        starEliteMonster.body.setSize(80, 80);
+        
+        // 반짝이는 효과
+        this.tweens.add({
+            targets: starEliteMonster,
+            alpha: 0.7,
+            duration: 800,
+            yoyo: true,
+            repeat: -1
+        });
+        
+        // 체력 바 생성
+        this.createEliteHealthBar(starEliteMonster, 'STAR ELITE');
+        
+        this.enemies.add(starEliteMonster);
+        this.currentEliteCount++;
+        
+        console.log(`Star elite monster spawned! Current elite count: ${this.currentEliteCount}`);
+    }
 
-    createEliteHealthBar(elite) {
+    createEliteHealthBar(elite, label = 'ELITE') {
         // 체력 바 배경
         const healthBarBg = this.add.rectangle(elite.x, elite.y - 80, 120, 12, 0x660000);
         healthBarBg.setStrokeStyle(2, 0xffffff);
@@ -967,7 +1043,7 @@ class GameScene extends Phaser.Scene {
         healthBar.setOrigin(0, 0.5);
         
         // 엘리트 이름 태그
-        const nameTag = this.add.text(elite.x, elite.y - 100, 'ELITE', {
+        const nameTag = this.add.text(elite.x, elite.y - 100, label, {
             fontSize: '14px',
             color: '#FFD700',
             stroke: '#000000',
@@ -1055,6 +1131,11 @@ class GameScene extends Phaser.Scene {
         if (this.difficultyLevel % this.pentagonWaveInterval === 0) {
             console.log(`Pentagon monster should spawn at wave ${this.difficultyLevel}`);
             this.spawnPentagonMonster();
+        }
+        
+        // 10웨이브 이후 엘리트 몬스터 최대 개수 증가
+        if (this.difficultyLevel >= 10) {
+            this.maxEliteCount = 2;
         }
         
         // 스폰 타이머 재설정
@@ -1442,6 +1523,7 @@ class GameScene extends Phaser.Scene {
             case 'enemy3': return 3;
             case 'pentagon_monster': return 8;
             case 'elite_monster': return 50;
+            case 'star_elite_monster': return 45;
             default: return 1;
         }
     }
@@ -1452,7 +1534,8 @@ class GameScene extends Phaser.Scene {
             case 'enemy2': return this.baseEnemySpeed * 1.3;
             case 'enemy3': return this.baseEnemySpeed * 0.8;
             case 'pentagon_monster': return this.baseEnemySpeed * 0.6;
-            case 'elite_monster': return this.baseEnemySpeed * 0.3;
+            case 'elite_monster': return this.baseEnemySpeed * 1.3; // 더욱 빠르게
+            case 'star_elite_monster': return this.baseEnemySpeed * 1.5; // 가장 빠르게
             default: return this.baseEnemySpeed;
         }
     }
@@ -1578,6 +1661,161 @@ class GameScene extends Phaser.Scene {
             this.gameOver();
         }
     }
+    
+    handleStarEliteDash(enemy, baseAngle) {
+        const currentTime = this.time.now;
+        
+        // 대시 쿨다운 체크
+        if (!enemy.isDashing && currentTime > enemy.lastDash + enemy.dashCooldown) {
+            // 대시 시작
+            enemy.isDashing = true;
+            enemy.lastDash = currentTime;
+            
+            // 새로운 랜덤 쿨다운 설정 (다음 대시까지)
+            enemy.dashCooldown = Phaser.Math.Between(3000, 10000);
+            
+            // 대시 방향 결정 (70% 확률로 플레이어 방향, 30% 확률로 현재 방향 유지)
+            if (Math.random() < 0.7) {
+                // 플레이어를 향해 대시
+                enemy.dashDirection.x = Math.cos(baseAngle);
+                enemy.dashDirection.y = Math.sin(baseAngle);
+            } else {
+                // 현재 진행 방향으로 대시 (기존 속도 방향)
+                const currentVelX = enemy.body.velocity.x;
+                const currentVelY = enemy.body.velocity.y;
+                const magnitude = Math.sqrt(currentVelX * currentVelX + currentVelY * currentVelY);
+                
+                if (magnitude > 0) {
+                    enemy.dashDirection.x = currentVelX / magnitude;
+                    enemy.dashDirection.y = currentVelY / magnitude;
+                } else {
+                    // 속도가 0이면 랜덤 방향
+                    const randomAngle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+                    enemy.dashDirection.x = Math.cos(randomAngle);
+                    enemy.dashDirection.y = Math.sin(randomAngle);
+                }
+            }
+            
+            // 대시 시각 효과
+            this.createStarEliteDashEffect(enemy);
+            
+            console.log('Star elite monster started dash!');
+        }
+        
+        if (enemy.isDashing) {
+            // 대시 중 이동
+            enemy.rotation += 0.3; // 빠른 회전
+            enemy.setVelocity(
+                enemy.dashDirection.x * enemy.dashSpeed,
+                enemy.dashDirection.y * enemy.dashSpeed
+            );
+            
+            // 대시 지속시간 체크
+            if (currentTime > enemy.lastDash + enemy.dashDuration) {
+                enemy.isDashing = false;
+                console.log('Star elite monster finished dash!');
+            }
+        } else {
+            // 일반 이동 (천천히)
+            enemy.rotation = baseAngle;
+            
+            let wobble = Math.sin(this.time.now * 0.001 + enemy.x * 0.005) * 0.1;
+            const angle = baseAngle + wobble;
+            
+            let velocityX = Math.cos(angle) * enemy.speed;
+            let velocityY = Math.sin(angle) * enemy.speed;
+            
+            // 넉백 효과 적용
+            if (enemy.knockbackX !== 0 || enemy.knockbackY !== 0) {
+                velocityX += enemy.knockbackX;
+                velocityY += enemy.knockbackY;
+                
+                enemy.knockbackX *= 0.92;
+                enemy.knockbackY *= 0.92;
+                
+                if (Math.abs(enemy.knockbackX) < 1) enemy.knockbackX = 0;
+                if (Math.abs(enemy.knockbackY) < 1) enemy.knockbackY = 0;
+            }
+            
+            enemy.setVelocity(velocityX, velocityY);
+        }
+        
+        // 엘리트 몬스터 체력바 업데이트
+        if (enemy.healthBar) {
+            enemy.healthBarBg.x = enemy.x;
+            enemy.healthBarBg.y = enemy.y - 80;
+            
+            const healthPercent = enemy.health / enemy.maxHealth;
+            enemy.healthBar.width = 120 * healthPercent;
+            enemy.healthBar.x = enemy.x - 60;
+            enemy.healthBar.y = enemy.y - 80;
+            
+            enemy.nameTag.x = enemy.x;
+            enemy.nameTag.y = enemy.y - 100;
+        }
+    }
+    
+    createStarEliteDashEffect(enemy) {
+        // 대시 시작 시 황금빛 폭발 효과
+        const startExplosion = this.add.graphics();
+        startExplosion.fillStyle(0xFFD700, 0.8);
+        startExplosion.fillCircle(enemy.x, enemy.y, 60);
+        
+        this.tweens.add({
+            targets: startExplosion,
+            scaleX: 2,
+            scaleY: 2,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => startExplosion.destroy()
+        });
+        
+        // 대시 궤적 효과
+        const trailCount = 8;
+        for (let i = 0; i < trailCount; i++) {
+            this.time.delayedCall(i * 40, () => {
+                if (enemy.active && enemy.isDashing) {
+                    const trail = this.add.sprite(enemy.x, enemy.y, 'star_elite_monster');
+                    trail.setTint(0xFFD700);
+                    trail.setAlpha(0.6 - (i * 0.07));
+                    trail.setScale(0.8 - (i * 0.08));
+                    
+                    this.tweens.add({
+                        targets: trail,
+                        alpha: 0,
+                        scale: 0.2,
+                        duration: 300,
+                        onComplete: () => trail.destroy()
+                    });
+                }
+            });
+        }
+        
+        // 대시 중 파티클 효과
+        this.time.delayedCall(0, () => {
+            for (let i = 0; i < 5; i++) {
+                this.time.delayedCall(i * 60, () => {
+                    if (enemy.active && enemy.isDashing) {
+                        const particle = this.add.graphics();
+                        particle.fillStyle(0xFFF176, 0.9);
+                        
+                        const offsetX = Phaser.Math.Between(-20, 20);
+                        const offsetY = Phaser.Math.Between(-20, 20);
+                        particle.fillCircle(enemy.x + offsetX, enemy.y + offsetY, 3);
+                        
+                        this.tweens.add({
+                            targets: particle,
+                            alpha: 0,
+                            scaleX: 0,
+                            scaleY: 0,
+                            duration: 200,
+                            onComplete: () => particle.destroy()
+                        });
+                    }
+                });
+            }
+        });
+    }
 
     moveEnemies(delta) {
         this.enemies.children.entries.forEach(enemy => {
@@ -1592,6 +1830,10 @@ class GameScene extends Phaser.Scene {
                     this.handlePentagonMovement(enemy, baseAngle, delta);
                     // 오각형 몬스터의 총알 발사 처리
                     this.handlePentagonShooting(enemy);
+                    return; // 일반 이동 로직 건너뛰기
+                } else if (enemy.enemyType === 'star_elite_monster') {
+                    // 스타 엘리트 몬스터는 대시 시스템을 가짐
+                    this.handleStarEliteDash(enemy, baseAngle);
                     return; // 일반 이동 로직 건너뛰기
                 } else if (enemy.enemyType === 'enemy2') {
                     // 삼각형 몬스터(enemy2)는 뾰족한 부분이 플레이어를 향하도록 회전
@@ -1728,15 +1970,20 @@ class GameScene extends Phaser.Scene {
         
         if (enemy.health <= 0) {
             // 엘리트 몬스터 특별 처리
-            if (enemy.enemyType === 'elite_monster') {
+            if (enemy.enemyType === 'elite_monster' || enemy.enemyType === 'star_elite_monster') {
                 // 체력바와 태그 제거
                 if (enemy.healthBarBg) enemy.healthBarBg.destroy();
                 if (enemy.healthBar) enemy.healthBar.destroy();
                 if (enemy.nameTag) enemy.nameTag.destroy();
                 
+                // 엘리트 카운터 감소
+                this.currentEliteCount--;
+                console.log(`Elite monster destroyed! Current elite count: ${this.currentEliteCount}`);
+                
                 // 더 많은 에너지 드롭
-                for (let i = 0; i < 8; i++) {
-                    const angle = (i / 8) * Math.PI * 2;
+                const energyCount = enemy.enemyType === 'star_elite_monster' ? 6 : 8;
+                for (let i = 0; i < energyCount; i++) {
+                    const angle = (i / energyCount) * Math.PI * 2;
                     const distance = 60;
                     const energyX = enemy.x + Math.cos(angle) * distance;
                     const energyY = enemy.y + Math.sin(angle) * distance;
@@ -1746,8 +1993,11 @@ class GameScene extends Phaser.Scene {
                 }
                 
                 // 엘리트 죽음 효과
-                this.cameras.main.shake(800, 0.05);
-                for (let i = 0; i < 5; i++) {
+                const shakeIntensity = enemy.enemyType === 'star_elite_monster' ? 0.04 : 0.05;
+                this.cameras.main.shake(800, shakeIntensity);
+                
+                const explosionCount = enemy.enemyType === 'star_elite_monster' ? 4 : 5;
+                for (let i = 0; i < explosionCount; i++) {
                     this.time.delayedCall(i * 100, () => {
                         this.createExplosion(
                             enemy.x + (Math.random() - 0.5) * 100,
@@ -1771,7 +2021,7 @@ class GameScene extends Phaser.Scene {
             this.score += points;
             
             // 엘리트 킬 카운트
-            if (enemy.enemyType === 'elite_monster') {
+            if (enemy.enemyType === 'elite_monster' || enemy.enemyType === 'star_elite_monster') {
                 this.eliteKills++;
             }
         }
@@ -1784,6 +2034,7 @@ class GameScene extends Phaser.Scene {
             case 'enemy3': return 30;
             case 'pentagon_monster': return 100;
             case 'elite_monster': return 500;
+            case 'star_elite_monster': return 400;
             default: return 10;
         }
     }
@@ -1884,6 +2135,22 @@ class GameScene extends Phaser.Scene {
         this.experienceToNext = 100 + (this.weaponLevel * 75);
         this.fireRate = Math.max(80, 200 - (this.weaponLevel - 1) * 15);
         this.fireRange = Math.min(500, 300 + (this.weaponLevel - 1) * 30);
+        
+        // 10레벨마다 총알 개수 증가 (레벨 10, 20, 30에서 증가)
+        if (this.weaponLevel % 10 === 0 && this.weaponLevel <= 30) {
+            this.bulletCount += 1;
+            console.log(`Level ${this.weaponLevel}: Bullet count increased to ${this.bulletCount}!`);
+            
+            // 총알 증가 시각적 피드백
+            this.tweens.add({
+                targets: this.bulletCountText,
+                scaleX: 2,
+                scaleY: 2,
+                duration: 300,
+                yoyo: true,
+                ease: 'Power2'
+            });
+        }
         
         console.log(`Level Up! New level: ${this.weaponLevel}`); // 디버그용
         
