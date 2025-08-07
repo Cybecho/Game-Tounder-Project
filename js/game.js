@@ -1,3 +1,299 @@
+// 능력치 수정자 엔진
+class StatModifierEngine {
+    constructor(gameScene) {
+        this.game = gameScene;
+        this.baseStats = {};
+        this.modifiers = new Map();
+        this.captureBaseStats();
+    }
+    
+    captureBaseStats() {
+        this.baseStats = {
+            playerSpeed: this.game.playerSpeed,
+            playerAcceleration: this.game.playerAcceleration,
+            playerDrag: this.game.playerDrag,
+            fireRate: this.game.fireRate,
+            bulletSpeed: this.game.bulletSpeed,
+            bulletCount: this.game.bulletCount,
+            fireRange: this.game.fireRange,
+            playerHealth: this.game.playerHealth,
+            maxPlayerHealth: this.game.maxPlayerHealth,
+            dashCooldown: this.game.dashCooldown,
+            lightningWaveCooldown: this.game.lightningWaveCooldown,
+            lightningWaveRadius: this.game.lightningWaveRadius
+        };
+    }
+    
+    addModifier(statName, modifierId, operation, value) {
+        if (!this.modifiers.has(statName)) {
+            this.modifiers.set(statName, new Map());
+        }
+        
+        this.modifiers.get(statName).set(modifierId, { operation, value });
+        this.recalculateStat(statName);
+    }
+    
+    removeModifier(statName, modifierId) {
+        if (this.modifiers.has(statName)) {
+            this.modifiers.get(statName).delete(modifierId);
+            this.recalculateStat(statName);
+        }
+    }
+    
+    recalculateStat(statName) {
+        let finalValue = this.baseStats[statName];
+        const statModifiers = this.modifiers.get(statName);
+        
+        if (statModifiers) {
+            // 먼저 덧셈 수정자 적용
+            for (let [id, modifier] of statModifiers) {
+                if (modifier.operation === 'add') {
+                    finalValue += modifier.value;
+                }
+            }
+            
+            // 그 다음 곱셈 수정자 적용
+            for (let [id, modifier] of statModifiers) {
+                if (modifier.operation === 'multiply') {
+                    finalValue *= modifier.value;
+                }
+            }
+        }
+        
+        // 게임 객체에 적용 (최소값 보장)
+        this.game[statName] = Math.max(1, finalValue);
+        
+        // 물리 엔진에도 적용 (필요한 경우)
+        this.applyToPhysicsEngine(statName, finalValue);
+    }
+    
+    applyToPhysicsEngine(statName, value) {
+        if (!this.game.player) return;
+        
+        switch(statName) {
+            case 'playerSpeed':
+                this.game.player.setMaxVelocity(value);
+                break;
+            case 'playerDrag':
+                this.game.player.setDrag(value);
+                break;
+        }
+    }
+}
+
+// 스킬 정의 객체
+const skillDefinitions = {
+    // === Active 스킬들 (50%) ===
+    
+    instant_barrier: {
+        id: 'instant_barrier',
+        name: '방어 배리어',
+        description: '공격을 1회 막아주는 배리어 생성 (최대 3회 중첩)',
+        category: 'active',
+        rarity: 'common',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.12,
+        effect: {
+            type: 'instant',
+            action: 'add_barrier_charge',
+            value: 1
+        }
+    },
+    
+    instant_heal: {
+        id: 'instant_heal',
+        name: '응급 치료',
+        description: '체력을 1 회복합니다',
+        category: 'active',
+        rarity: 'common',
+        stackable: false,
+        probability: 0.10,
+        effect: {
+            type: 'instant',
+            action: 'heal_player',
+            value: 1
+        }
+    },
+    
+    agility_buff: {
+        id: 'agility_buff',
+        name: '민첩성 강화',
+        description: '30초동안 조작감이 매우 민첩해집니다',
+        category: 'active',
+        rarity: 'uncommon',
+        stackable: false,
+        probability: 0.08,
+        effect: {
+            type: 'timed_buff',
+            buffId: 'agility_boost',
+            duration: 30000,
+            modifiers: [
+                { target: 'playerDrag', operation: 'multiply', value: 1.67 },
+                { target: 'playerAcceleration', operation: 'multiply', value: 1.5 }
+            ]
+        }
+    },
+    
+    speed_buff: {
+        id: 'speed_buff',
+        name: '질주',
+        description: '30초동안 이동속도가 50% 증가합니다',
+        category: 'active',
+        rarity: 'uncommon',
+        stackable: false,
+        probability: 0.08,
+        effect: {
+            type: 'timed_buff',
+            buffId: 'speed_boost',
+            duration: 30000,
+            modifiers: [
+                { target: 'playerSpeed', operation: 'multiply', value: 1.5 }
+            ]
+        }
+    },
+    
+    // === Passive 스킬들 (35%) ===
+    
+    bullet_count_increase: {
+        id: 'bullet_count_increase',
+        name: '다중 사격',
+        description: '총알이 +1개 추가됩니다 (최대 8개)',
+        category: 'passive',
+        rarity: 'common',
+        stackable: true,
+        maxStacks: 7,
+        probability: 0.10,
+        effect: {
+            type: 'stat_modifier',
+            target: 'bulletCount',
+            operation: 'add',
+            value: 1
+        }
+    },
+    
+    fire_rate_up: {
+        id: 'fire_rate_up',
+        name: '속사',
+        description: '발사 속도가 25% 빨라집니다 (최대 5회)',
+        category: 'passive',
+        rarity: 'common',
+        stackable: true,
+        maxStacks: 5,
+        probability: 0.08,
+        effect: {
+            type: 'stat_modifier',
+            target: 'fireRate',
+            operation: 'multiply',
+            value: 0.8
+        }
+    },
+    
+    max_speed_increase: {
+        id: 'max_speed_increase',
+        name: '신속',
+        description: '최대 이동속도가 25% 증가합니다 (최대 3회)',
+        category: 'passive',
+        rarity: 'common',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.06,
+        effect: {
+            type: 'stat_modifier',
+            target: 'playerSpeed',
+            operation: 'multiply',
+            value: 1.25
+        }
+    },
+    
+    fire_range_increase: {
+        id: 'fire_range_increase',
+        name: '장거리 사격',
+        description: '사격 범위가 30% 증가합니다 (최대 3회)',
+        category: 'passive',
+        rarity: 'common',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.06,
+        effect: {
+            type: 'stat_modifier',
+            target: 'fireRange',
+            operation: 'multiply',
+            value: 1.3
+        }
+    },
+    
+    responsive_control: {
+        id: 'responsive_control',
+        name: '반응성 향상',
+        description: '플레이어 컨트롤이 더욱 즉각적으로 변합니다',
+        category: 'passive',
+        rarity: 'uncommon',
+        stackable: true,
+        maxStacks: 2,
+        probability: 0.05,
+        effect: {
+            type: 'stat_modifier',
+            target: 'playerAcceleration',
+            operation: 'multiply',
+            value: 1.4
+        }
+    },
+    
+    // === Skill 스킬들 (15%) ===
+    
+    dash_efficiency: {
+        id: 'dash_efficiency',
+        name: '순간이동 숙련',
+        description: '대쉬 쿨타임이 20% 단축됩니다 (최대 3회)',
+        category: 'skill',
+        rarity: 'uncommon',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.05,
+        effect: {
+            type: 'stat_modifier',
+            target: 'dashCooldown',
+            operation: 'multiply',
+            value: 0.8
+        }
+    },
+    
+    shockwave_range_increase: {
+        id: 'shockwave_range_increase',
+        name: '거대 파동',
+        description: '파동파의 범위가 25% 증가합니다 (최대 2회)',
+        category: 'skill',
+        rarity: 'uncommon',
+        stackable: true,
+        maxStacks: 2,
+        probability: 0.04,
+        effect: {
+            type: 'stat_modifier',
+            target: 'lightningWaveRadius',
+            operation: 'multiply',
+            value: 1.25
+        }
+    },
+    
+    lightning_wave_cooldown: {
+        id: 'lightning_wave_cooldown',
+        name: '파동파 숙련',
+        description: '파동파 쿨타임이 20% 단축됩니다 (최대 3회)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.03,
+        effect: {
+            type: 'stat_modifier',
+            target: 'lightningWaveCooldown',
+            operation: 'multiply',
+            value: 0.8
+        }
+    }
+};
+
 class TitleScene extends Phaser.Scene {
     constructor() {
         super({ key: 'TitleScene' });
@@ -231,6 +527,43 @@ class GameScene extends Phaser.Scene {
         
         // 레벨업 시스템 보호 플래그들
         this.isLevelingUp = false; // 레벨업 진행 중 중복 방지
+        this.isSkillSelectionActive = false; // 스킬 선택 중 게임 정지
+        
+        // 스킬 시스템
+        this.skillSystem = {
+            // 선택된 스킬들
+            selectedSkills: new Set(),
+            skillStacks: new Map(),
+            
+            // 액티브 스킬 상태
+            barrierCharges: 0,
+            maxBarrierCharges: 3,
+            
+            // 시간 제한 버프들
+            activeBuffs: new Map(),
+            
+            // UI 상태
+            isCardSelectionActive: false,
+            currentCardOptions: [],
+            
+            // 광고 관련 (추후 구현)
+            adRefreshCount: 0,
+            maxAdRefreshPerLevel: 1
+        };
+        
+        // 스킬 이벤트 핸들러 시스템
+        this.skillEventHandlers = {
+            onBulletHit: [],
+            onEnemyKill: [],
+            onPlayerHit: [],
+            onDashStart: [],
+            onDashEnd: [],
+            onLightningWave: [],
+            onLevelUp: []
+        };
+        
+        // 능력치 수정자 엔진 (추후 구현)
+        this.statModifierEngine = null;
     }
 
     preload() {
@@ -330,6 +663,9 @@ class GameScene extends Phaser.Scene {
     create() {
         // 게임 재시작시 모든 변수 초기화
         this.initializeGameVariables();
+        
+        // 능력치 수정자 엔진 초기화
+        this.statModifierEngine = new StatModifierEngine(this);
         
         // 월드 경계 설정
         this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
@@ -598,9 +934,21 @@ class GameScene extends Phaser.Scene {
             stroke: '#000000',
             strokeThickness: 1
         }).setScrollFactor(0);
+        
+        // 배리어 상태 표시 (왼쪽 하단)
+        this.barrierText = this.add.text(16, 550, 'Barriers: 0', {
+            fontSize: '16px',
+            color: '#00aaff',
+            stroke: '#000000',
+            strokeThickness: 1,
+            fontWeight: 'bold'
+        }).setScrollFactor(0);
     }
 
     onPointerDown(pointer) {
+        // 스킬 선택 중이면 대쉬 차단
+        if (this.isSkillSelectionActive) return;
+        
         if (this.isDashing || this.dashCharges <= 0) return;
         
         // 월드 좌표로 변환
@@ -841,6 +1189,9 @@ class GameScene extends Phaser.Scene {
     }
 
     spawnBulletUpgrade() {
+        // 스킬 선택 중이면 스폰 차단
+        if (this.isSkillSelectionActive) return;
+        
         // 매우 낮은 확률로 스폰 (30% 확률)
         if (Math.random() > 0.3) return;
         
@@ -891,6 +1242,9 @@ class GameScene extends Phaser.Scene {
     }
 
     spawnEliteMonster() {
+        // 스킬 선택 중이면 스폰 차단
+        if (this.isSkillSelectionActive) return;
+        
         // 플레이어로부터 멀리 스폰
         const spawnRadius = 1000;
         const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
@@ -937,6 +1291,9 @@ class GameScene extends Phaser.Scene {
     }
     
     spawnPentagonMonster() {
+        // 스킬 선택 중이면 스폰 차단
+        if (this.isSkillSelectionActive) return;
+        
         // 플레이어로부터 멀리 스폰 (엘리트보다는 가까이)
         const spawnRadius = 500;
         const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
@@ -979,6 +1336,9 @@ class GameScene extends Phaser.Scene {
     }
     
     spawnStarEliteMonster() {
+        // 스킬 선택 중이면 스폰 차단
+        if (this.isSkillSelectionActive) return;
+        
         // 플레이어로부터 멀리 스폰
         const spawnRadius = 1000;
         const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
@@ -1062,6 +1422,11 @@ class GameScene extends Phaser.Scene {
             this.levelUp();
         }
         
+        // 스킬 선택 중이면 게임 로직 실행 중단
+        if (this.isSkillSelectionActive) {
+            return;
+        }
+        
         this.movePlayer(delta);
         this.fireWeapon(time);
         this.handleLightningWave(time);
@@ -1124,8 +1489,16 @@ class GameScene extends Phaser.Scene {
         // 웨이브당 적 수 증가 (최대 4마리)
         this.enemiesPerWave = Math.min(4, Math.floor(this.difficultyLevel / 3) + 1);
         
-        // 적 기본 속도 증가
-        this.baseEnemySpeed = 100 + (this.difficultyLevel * 12);
+        // 적 기본 속도 증가 (더 완만하게 조정)
+        // 처음 10웨이브까지는 천천히, 그 이후 조금 더 빠르게
+        if (this.difficultyLevel <= 10) {
+            this.baseEnemySpeed = 100 + (this.difficultyLevel * 5); // 5씩 증가 (100 -> 150)
+        } else {
+            this.baseEnemySpeed = 150 + ((this.difficultyLevel - 10) * 3); // 3씩 증가
+        }
+        
+        // 최대 속도 제한 (200까지만)
+        this.baseEnemySpeed = Math.min(this.baseEnemySpeed, 200);
         
         // 5웨이브마다 오각형 몬스터 스폰
         if (this.difficultyLevel % this.pentagonWaveInterval === 0) {
@@ -1268,6 +1641,21 @@ class GameScene extends Phaser.Scene {
         const expProgress = (this.experience / this.experienceToNext) * 350;
         this.expBar.width = Math.max(0, expProgress);
         this.expText.setText(`${this.experience}/${this.experienceToNext} EXP`);
+        
+        // 배리어 상태 업데이트
+        if (this.barrierText) {
+            const barriers = this.skillSystem.barrierCharges || 0;
+            this.barrierText.setText(`Barriers: ${barriers}`);
+            
+            // 배리어가 있을 때 색상 변경
+            if (barriers > 0) {
+                this.barrierText.setColor('#00aaff');
+                this.barrierText.setAlpha(1);
+            } else {
+                this.barrierText.setColor('#666666');
+                this.barrierText.setAlpha(0.7);
+            }
+        }
     }
 
     movePlayer(delta) {
@@ -1296,6 +1684,9 @@ class GameScene extends Phaser.Scene {
         if (!this.lightningWaveReady && time > this.lightningWaveLastUsed + this.lightningWaveCooldown) {
             this.lightningWaveReady = true;
         }
+        
+        // 스킬 선택 중이면 파동파 차단
+        if (this.isSkillSelectionActive) return;
         
         // 스페이스바 입력 체크
         if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && this.lightningWaveReady) {
@@ -1479,8 +1870,13 @@ class GameScene extends Phaser.Scene {
     }
 
     spawnEnemyWave() {
+        // 스킬 선택 중이면 스폰 차단
+        if (this.isSkillSelectionActive) return;
+        
         for (let i = 0; i < this.enemiesPerWave; i++) {
             this.time.delayedCall(i * 150, () => {
+                // 스폰 시점에도 다시 체크
+                if (this.isSkillSelectionActive) return;
                 this.spawnEnemy();
             });
         }
@@ -2133,29 +2529,19 @@ class GameScene extends Phaser.Scene {
         this.weaponLevel += 1;
         this.experience = 0;
         this.experienceToNext = 100 + (this.weaponLevel * 75);
-        this.fireRate = Math.max(80, 200 - (this.weaponLevel - 1) * 15);
-        this.fireRange = Math.min(500, 300 + (this.weaponLevel - 1) * 30);
-        
-        // 10레벨마다 총알 개수 증가 (레벨 10, 20, 30에서 증가)
-        if (this.weaponLevel % 10 === 0 && this.weaponLevel <= 30) {
-            this.bulletCount += 1;
-            console.log(`Level ${this.weaponLevel}: Bullet count increased to ${this.bulletCount}!`);
-            
-            // 총알 증가 시각적 피드백
-            this.tweens.add({
-                targets: this.bulletCountText,
-                scaleX: 2,
-                scaleY: 2,
-                duration: 300,
-                yoyo: true,
-                ease: 'Power2'
-            });
-        }
         
         console.log(`Level Up! New level: ${this.weaponLevel}`); // 디버그용
         
-        // 새로운 레벨업 연출
-        this.performLevelUpSequence();
+        // 1. 즉시 파동파 발동 (쿨타임 무시)
+        this.performLightningWave();
+        
+        // 2. 레벨업 시각 효과 표시
+        this.showLevelUpText();
+        
+        // 3. 2초 후 스킬 카드 선택 화면 표시 (파동파 효과 완료 대기)
+        this.time.delayedCall(2000, () => {
+            this.showSkillCardSelection();
+        });
     }
 
     performLevelUpSequence() {
@@ -2214,6 +2600,16 @@ class GameScene extends Phaser.Scene {
             return;
         }
         
+        // 배리어 체크
+        if (this.skillSystem.barrierCharges > 0) {
+            this.skillSystem.barrierCharges--;
+            this.showBarrierBreakEffect();
+            console.log(`배리어로 공격 차단! 남은 배리어: ${this.skillSystem.barrierCharges}`);
+            
+            enemy.destroy();
+            return; // 피해 무시
+        }
+        
         this.playerHealth -= 1;
         
         // 피격시에만 화면 흔들림!
@@ -2264,6 +2660,42 @@ class GameScene extends Phaser.Scene {
             }
         });
     }
+    
+    showBarrierBreakEffect() {
+        // 플레이어 주위에 배리어가 깨지는 이펙트
+        const barrierEffect = this.add.circle(this.player.x, this.player.y, 0, 0x00aaff, 0.7);
+        
+        this.tweens.add({
+            targets: barrierEffect,
+            radius: 50,
+            alpha: 0,
+            duration: 300,
+            ease: 'Power2',
+            onComplete: () => {
+                barrierEffect.destroy();
+            }
+        });
+        
+        // 배리어 차단 텍스트 표시
+        const barrierText = this.add.text(this.player.x, this.player.y - 40, '배리어!', {
+            fontSize: '16px',
+            color: '#00aaff',
+            stroke: '#ffffff',
+            strokeThickness: 1,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        this.tweens.add({
+            targets: barrierText,
+            y: this.player.y - 80,
+            alpha: 0,
+            duration: 1000,
+            ease: 'Power2',
+            onComplete: () => {
+                barrierText.destroy();
+            }
+        });
+    }
 
     gameOver() {
         this.scene.pause();
@@ -2274,6 +2706,417 @@ class GameScene extends Phaser.Scene {
             wave: this.difficultyLevel,
             bulletCount: this.bulletCount,
             eliteKills: this.eliteKills
+        });
+    }
+    
+    // === 스킬 카드 시스템 메서드들 ===
+    
+    showSkillCardSelection() {
+        // 게임 일시정지
+        this.pauseGameForSkillSelection();
+        
+        // 스킬 카드 선택 활성화
+        this.skillSystem.isCardSelectionActive = true;
+        
+        // 3장의 랜덤 스킬 생성
+        const randomSkills = this.generateRandomSkills(3);
+        this.skillSystem.currentCardOptions = randomSkills;
+        
+        // UI 생성
+        this.createSkillCardSelectionUI(randomSkills);
+    }
+    
+    pauseGameForSkillSelection() {
+        // 물리 시뮬레이션 일시정지
+        this.physics.world.pause();
+        
+        // 게임 화면 어둡게 하기
+        this.gameOverlay = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.5)
+            .setScrollFactor(0)
+            .setDepth(999);
+            
+        // 스킬 선택 중임을 표시하는 플래그
+        this.isSkillSelectionActive = true;
+    }
+    
+    generateRandomSkills(count = 3) {
+        const availableSkills = Object.values(skillDefinitions)
+            .filter(skill => this.canSelectSkill(skill));
+            
+        const selectedSkills = [];
+        const usedSkillIds = new Set();
+        
+        // 카테고리별 가중치
+        const categoryWeights = {
+            active: 0.50,
+            passive: 0.35,
+            skill: 0.15
+        };
+        
+        // 만약 선택 가능한 스킬이 count보다 적으면 모든 스킬 반환
+        if (availableSkills.length <= count) {
+            return availableSkills;
+        }
+        
+        // count 만큼 반복하되, 중복 제거
+        for (let i = 0; i < count && i < availableSkills.length; i++) {
+            // 아직 선택되지 않은 스킬들만 필터링
+            const remainingSkills = availableSkills.filter(skill => 
+                !usedSkillIds.has(skill.id)
+            );
+            
+            if (remainingSkills.length === 0) break;
+            
+            // 가중치 기반 랜덤 선택
+            const skill = this.weightedRandomSelection(remainingSkills, categoryWeights);
+            if (skill) {
+                selectedSkills.push(skill);
+                usedSkillIds.add(skill.id);
+            }
+        }
+        
+        console.log(`Generated ${selectedSkills.length} skills:`, selectedSkills.map(s => s.name));
+        return selectedSkills;
+    }
+    
+    canSelectSkill(skill) {
+        // 일회성 스킬 (stackable: false)인 경우 한 번만 선택 가능
+        if (!skill.stackable) {
+            return !this.skillSystem.selectedSkills.has(skill.id);
+        }
+        
+        // 스택 가능한 스킬인 경우 최대 스택 수 확인
+        const currentStacks = this.skillSystem.skillStacks.get(skill.id) || 0;
+        const maxStacks = skill.maxStacks || 1;
+        
+        // 최대 스택에 도달했으면 선택 불가
+        if (currentStacks >= maxStacks) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    weightedRandomSelection(skills, categoryWeights) {
+        if (skills.length === 0) return null;
+        
+        // 확률 기반 선택 (현재는 단순 랜덤)
+        return skills[Math.floor(Math.random() * skills.length)];
+    }
+    
+    createSkillCardSelectionUI(skills) {
+        // 모달 배경
+        this.skillModal = {
+            background: this.add.rectangle(400, 300, 700, 400, 0x1a1a1a, 0.95)
+                .setScrollFactor(0)
+                .setDepth(1000)
+                .setStrokeStyle(4, 0x4CAF50),
+                
+            title: this.add.text(400, 180, '스킬 선택', {
+                fontSize: '36px',
+                color: '#4CAF50',
+                stroke: '#000000',
+                strokeThickness: 3,
+                fontWeight: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(1001),
+            
+            cards: []
+        };
+        
+        // 3장의 카드 생성
+        skills.forEach((skill, index) => {
+            this.createSkillCard(skill, index);
+        });
+        
+        // 페이드인 애니메이션
+        this.skillModal.background.setAlpha(0);
+        this.skillModal.title.setAlpha(0);
+        
+        this.tweens.add({
+            targets: [this.skillModal.background, this.skillModal.title],
+            alpha: 1,
+            duration: 300,
+            ease: 'Power2'
+        });
+    }
+    
+    createSkillCard(skill, index) {
+        const cardX = 250 + (index * 150); // 250, 400, 550
+        const cardY = 300;
+        
+        // 희귀도에 따른 색상
+        const rarityColors = {
+            common: 0x9E9E9E,     // 회색
+            uncommon: 0x4CAF50,   // 녹색  
+            rare: 0x2196F3,       // 파랑
+            legendary: 0xFF9800   // 주황
+        };
+        
+        const card = {
+            // 카드 배경
+            background: this.add.rectangle(cardX, cardY, 120, 180, 0x2a2a2a, 0.9)
+                .setScrollFactor(0)
+                .setDepth(1002)
+                .setStrokeStyle(2, rarityColors[skill.rarity])
+                .setInteractive(),
+                
+            // 스킬 이름
+            name: this.add.text(cardX, cardY - 60, skill.name, {
+                fontSize: '14px',
+                color: '#ffffff',
+                fontWeight: 'bold',
+                align: 'center',
+                wordWrap: { width: 100 }
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(1003),
+            
+            // 스킬 설명
+            description: this.add.text(cardX, cardY - 10, skill.description, {
+                fontSize: '10px',
+                color: '#cccccc',
+                align: 'center',
+                wordWrap: { width: 100 }
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(1003),
+            
+            // 선택 버튼
+            selectButton: this.add.rectangle(cardX, cardY + 60, 80, 25, 0x4CAF50, 0.8)
+                .setScrollFactor(0)
+                .setDepth(1003)
+                .setStrokeStyle(1, 0xffffff)
+                .setInteractive(),
+                
+            selectText: this.add.text(cardX, cardY + 60, '선택', {
+                fontSize: '12px',
+                color: '#ffffff',
+                fontWeight: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0).setDepth(1004)
+        };
+        
+        // 호버 효과
+        card.background.on('pointerover', () => {
+            this.tweens.add({
+                targets: card.background,
+                scaleX: 1.05,
+                scaleY: 1.05,
+                duration: 150
+            });
+        });
+        
+        card.background.on('pointerout', () => {
+            this.tweens.add({
+                targets: card.background,
+                scaleX: 1.0,
+                scaleY: 1.0,
+                duration: 150
+            });
+        });
+        
+        // 선택 이벤트
+        const selectSkill = () => {
+            this.selectSkillCard(skill);
+        };
+        
+        card.selectButton.on('pointerdown', selectSkill);
+        card.background.on('pointerdown', selectSkill);
+        
+        this.skillModal.cards.push(card);
+        
+        // 카드 등장 애니메이션
+        card.background.setAlpha(0);
+        card.name.setAlpha(0);
+        card.description.setAlpha(0);
+        card.selectButton.setAlpha(0);
+        card.selectText.setAlpha(0);
+        
+        this.time.delayedCall(100 + (index * 100), () => {
+            this.tweens.add({
+                targets: [card.background, card.name, card.description, card.selectButton, card.selectText],
+                alpha: 1,
+                duration: 300,
+                ease: 'Power2'
+            });
+        });
+    }
+    
+    selectSkillCard(skill) {
+        console.log(`스킬 선택: ${skill.name}`);
+        
+        // 스킬 효과 적용
+        this.applySkillEffect(skill);
+        
+        // UI 제거
+        this.hideSkillCardSelection();
+        
+        // 게임 재개
+        this.resumeGameAfterSkillSelection();
+    }
+    
+    applySkillEffect(skill) {
+        // 스킬 획득 기록
+        this.skillSystem.selectedSkills.add(skill.id);
+        
+        if (skill.stackable) {
+            const currentStacks = this.skillSystem.skillStacks.get(skill.id) || 0;
+            this.skillSystem.skillStacks.set(skill.id, currentStacks + 1);
+        }
+        
+        switch(skill.effect.type) {
+            case 'stat_modifier':
+                this.applyStatModifier(skill);
+                break;
+            case 'instant':
+                this.applyInstantEffect(skill);
+                break;
+            case 'timed_buff':
+                this.applyTimedBuff(skill);
+                break;
+        }
+        
+        // 선택 피드백
+        this.showSkillAcquiredText(skill);
+    }
+    
+    applyStatModifier(skill) {
+        const modifierId = `${skill.id}_${Date.now()}`;
+        this.statModifierEngine.addModifier(
+            skill.effect.target,
+            modifierId,
+            skill.effect.operation,
+            skill.effect.value
+        );
+    }
+    
+    applyInstantEffect(skill) {
+        switch(skill.effect.action) {
+            case 'add_barrier_charge':
+                this.skillSystem.barrierCharges = Math.min(
+                    this.skillSystem.barrierCharges + 1,
+                    this.skillSystem.maxBarrierCharges
+                );
+                console.log(`배리어 충전: ${this.skillSystem.barrierCharges}`);
+                break;
+            case 'heal_player':
+                this.playerHealth = Math.min(this.playerHealth + 1, this.maxPlayerHealth);
+                this.updateUI(); // UI 전체 업데이트
+                console.log(`체력 회복: ${this.playerHealth}`);
+                break;
+        }
+    }
+    
+    applyTimedBuff(skill) {
+        const effect = skill.effect;
+        const buffId = effect.buffId;
+        
+        // 기존 버프 제거
+        if (this.skillSystem.activeBuffs.has(buffId)) {
+            this.removeTimedBuff(buffId);
+        }
+        
+        const buffData = {
+            startTime: this.time.now,
+            duration: effect.duration,
+            modifiers: []
+        };
+        
+        // 능력치 수정자 적용
+        effect.modifiers.forEach(mod => {
+            const modifierId = `buff_${buffId}_${mod.target}`;
+            this.statModifierEngine.addModifier(
+                mod.target, modifierId, mod.operation, mod.value
+            );
+            buffData.modifiers.push(modifierId);
+        });
+        
+        this.skillSystem.activeBuffs.set(buffId, buffData);
+        
+        // 시각적 피드백
+        if (buffId === 'agility_boost') {
+            this.player.setTint(0x00ff88);
+        } else if (buffId === 'speed_boost') {
+            this.player.setTint(0x00aaff);
+        }
+        
+        // 만료 타이머 설정
+        this.time.delayedCall(effect.duration, () => {
+            this.removeTimedBuff(buffId);
+        });
+        
+        console.log(`버프 적용: ${buffId} (${effect.duration}ms)`);
+    }
+    
+    removeTimedBuff(buffId) {
+        const buffData = this.skillSystem.activeBuffs.get(buffId);
+        if (!buffData) return;
+        
+        // 모든 모디파이어 제거
+        buffData.modifiers.forEach(modifierId => {
+            const [, , target] = modifierId.split('_');
+            this.statModifierEngine.removeModifier(target, modifierId);
+        });
+        
+        this.skillSystem.activeBuffs.delete(buffId);
+        
+        // 시각적 효과 제거
+        this.player.clearTint();
+        
+        console.log(`버프 만료: ${buffId}`);
+    }
+    
+    showSkillAcquiredText(skill) {
+        const acquiredText = this.add.text(400, 150, `${skill.name} 획득!`, {
+            fontSize: '24px',
+            color: '#4CAF50',
+            stroke: '#000000',
+            strokeThickness: 2,
+            fontWeight: 'bold'
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(1500);
+        
+        // 애니메이션
+        this.tweens.add({
+            targets: acquiredText,
+            y: 100,
+            alpha: 0,
+            duration: 2000,
+            ease: 'Power2'
+        });
+        
+        this.time.delayedCall(2000, () => {
+            acquiredText.destroy();
+        });
+    }
+    
+    hideSkillCardSelection() {
+        if (this.skillModal) {
+            // 모든 UI 요소 제거
+            this.skillModal.background.destroy();
+            this.skillModal.title.destroy();
+            this.skillModal.cards.forEach(card => {
+                Object.values(card).forEach(element => {
+                    if (element.destroy) element.destroy();
+                });
+            });
+            this.skillModal = null;
+        }
+        
+        this.skillSystem.isCardSelectionActive = false;
+        this.skillSystem.currentCardOptions = [];
+    }
+    
+    resumeGameAfterSkillSelection() {
+        // 스킬 선택 종료 플래그
+        this.isSkillSelectionActive = false;
+        
+        // 오버레이 제거
+        if (this.gameOverlay) {
+            this.gameOverlay.destroy();
+            this.gameOverlay = null;
+        }
+        
+        // 물리 시뮬레이션 재개
+        this.physics.world.resume();
+        
+        // 레벨업 완료
+        this.time.delayedCall(1000, () => {
+            this.isLevelingUp = false;
         });
     }
 }
