@@ -1,3 +1,143 @@
+class TitleScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'TitleScene' });
+    }
+
+    preload() {
+        // 플레이어 이미지 로드 (미리보기용)
+        this.load.image('player', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="12" fill="#4CAF50" stroke="#2E7D32" stroke-width="2"/>
+                <circle cx="16" cy="16" r="6" fill="#81C784"/>
+            </svg>
+        `));
+    }
+
+    create() {
+        // 배경색 설정
+        this.cameras.main.setBackgroundColor('#0a0a1a');
+        
+        // 제목
+        const titleText = this.add.text(400, 150, 'GAME TOUNDER', {
+            fontSize: '72px',
+            color: '#4CAF50',
+            stroke: '#000000',
+            strokeThickness: 4,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        // 부제목
+        const subtitleText = this.add.text(400, 220, 'Survive the Wave', {
+            fontSize: '24px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setOrigin(0.5);
+        
+        // 플레이어 미리보기 스프라이트
+        const playerPreview = this.add.sprite(400, 300, 'player');
+        playerPreview.setScale(2);
+        
+        // 펄스 효과
+        this.tweens.add({
+            targets: playerPreview,
+            scaleX: 2.2,
+            scaleY: 2.2,
+            duration: 1000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Power2'
+        });
+        
+        // 조작법 안내
+        const controlsText = this.add.text(400, 380, [
+            'WASD / Arrow Keys - Move',
+            'Mouse Click - Dash',
+            'SPACE - Lightning Wave',
+            'L - Level Up (Test)'
+        ], {
+            fontSize: '18px',
+            color: '#cccccc',
+            stroke: '#000000',
+            strokeThickness: 1,
+            align: 'center'
+        }).setOrigin(0.5);
+        
+        // 시작 버튼
+        const startButton = this.add.rectangle(400, 500, 300, 60, 0x4CAF50, 0.9);
+        startButton.setStrokeStyle(3, 0xffffff);
+        startButton.setInteractive();
+        
+        const startButtonText = this.add.text(400, 500, 'START GAME', {
+            fontSize: '32px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        // 시작 안내
+        const hintText = this.add.text(400, 570, 'Press SPACE or click START GAME', {
+            fontSize: '16px',
+            color: '#aaaaaa'
+        }).setOrigin(0.5);
+        
+        // 버튼 이벤트
+        const startGame = () => {
+            this.scene.start('GameScene');
+        };
+        
+        startButton.on('pointerdown', startGame);
+        
+        // 호버 효과
+        startButton.on('pointerover', () => {
+            startButton.setFillStyle(0x66BB6A, 1);
+            this.tweens.add({
+                targets: [startButton, startButtonText],
+                scaleX: 1.05,
+                scaleY: 1.05,
+                duration: 150
+            });
+        });
+        
+        startButton.on('pointerout', () => {
+            startButton.setFillStyle(0x4CAF50, 0.9);
+            this.tweens.add({
+                targets: [startButton, startButtonText],
+                scaleX: 1,
+                scaleY: 1,
+                duration: 150
+            });
+        });
+        
+        // 스페이스바로도 시작
+        this.input.keyboard.once('keydown-SPACE', startGame);
+        
+        // 제목 애니메이션
+        titleText.setAlpha(0);
+        this.tweens.add({
+            targets: titleText,
+            alpha: 1,
+            scaleX: 1.1,
+            scaleY: 1.1,
+            duration: 1000,
+            ease: 'Back.easeOut'
+        });
+        
+        // 순차적으로 요소들 페이드인
+        const elementsToFadeIn = [subtitleText, playerPreview, controlsText, startButton, startButtonText, hintText];
+        elementsToFadeIn.forEach((element, index) => {
+            element.setAlpha(0);
+            this.tweens.add({
+                targets: element,
+                alpha: 1,
+                duration: 600,
+                delay: 200 + (index * 150)
+            });
+        });
+    }
+}
+
 class GameScene extends Phaser.Scene {
     constructor() {
         super({ key: 'GameScene' });
@@ -27,6 +167,10 @@ class GameScene extends Phaser.Scene {
         this.gameTime = 0;
         this.eliteKills = 0;
         
+        // 오각형 몬스터 시스템
+        this.pentagonWaveInterval = 5; // 5웨이브마다 등장
+        this.pentagonCount = 0; // 오각형 몬스터 카운터 (디버깅용)
+        
         // UI 관련
         this.scoreText = null;
         this.weaponLevelText = null;
@@ -47,6 +191,7 @@ class GameScene extends Phaser.Scene {
         this.maxPlayerHealth = 3;
         this.experience = 0;
         this.experienceToNext = 100;
+        this.isPlayerInvincible = false;
         
         // 적 스폰 관련
         this.enemySpawnRate = 1200;
@@ -71,8 +216,8 @@ class GameScene extends Phaser.Scene {
         this.lastBulletUpgradeSpawn = 0;
         
         // 엘리트 몬스터 시스템
-        this.eliteSpawnRate = 45000;
-        this.eliteSpawnChance = 0.15;
+        this.eliteSpawnRate = 35000; // 45초에서 35초로 단축
+        this.eliteSpawnChance = 0.20; // 15%에서 20%로 증가
         this.lastEliteSpawn = 0;
         
         // 번개 파동파 시스템
@@ -156,6 +301,20 @@ class GameScene extends Phaser.Scene {
                 <polygon points="70,40 55,45 58,40 55,35" fill="#FFD700"/>
             </svg>
         `));
+        
+        this.load.image('pentagon_monster', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="36" height="36" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="18,2 32,12 26,28 10,28 4,12" fill="#FF6B35" stroke="#D84315" stroke-width="2"/>
+                <polygon points="18,8 26,16 22,24 14,24 10,16" fill="#FF8A65"/>
+                <circle cx="18" cy="18" r="4" fill="#FFAB40"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy_bullet', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="6" height="6" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="3" cy="3" r="2" fill="#FF1744" stroke="#B71C1C" stroke-width="1"/>
+            </svg>
+        `));
     }
 
     create() {
@@ -175,6 +334,7 @@ class GameScene extends Phaser.Scene {
         
         this.enemies = this.physics.add.group();
         this.bullets = this.physics.add.group();
+        this.enemyBullets = this.physics.add.group(); // 적 총알 그룹 추가
         this.energy = this.physics.add.group();
         this.bulletUpgrades = this.physics.add.group();
         this.explosions = this.add.group();
@@ -238,6 +398,7 @@ class GameScene extends Phaser.Scene {
         this.physics.add.overlap(this.player, this.energy, this.collectEnergy, null, this);
         this.physics.add.overlap(this.player, this.bulletUpgrades, this.collectBulletUpgrade, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.playerHit, null, this);
+        this.physics.add.overlap(this.player, this.enemyBullets, this.playerHitByBullet, null, this);
     }
 
     createGridBackground() {
@@ -753,6 +914,48 @@ class GameScene extends Phaser.Scene {
         
         console.log('Elite monster spawned!');
     }
+    
+    spawnPentagonMonster() {
+        // 플레이어로부터 멀리 스폰 (엘리트보다는 가까이)
+        const spawnRadius = 500;
+        const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const distance = Phaser.Math.FloatBetween(spawnRadius, spawnRadius + 200);
+        
+        const x = this.player.x + Math.cos(angle) * distance;
+        const y = this.player.y + Math.sin(angle) * distance;
+        
+        // 월드 경계 내에서만 스폰
+        const clampedX = Phaser.Math.Clamp(x, 80, this.worldWidth - 80);
+        const clampedY = Phaser.Math.Clamp(y, 80, this.worldHeight - 80);
+        
+        const pentagonMonster = this.physics.add.sprite(clampedX, clampedY, 'pentagon_monster');
+        pentagonMonster.enemyType = 'pentagon_monster';
+        pentagonMonster.health = 8; // 중간 정도 체력
+        pentagonMonster.maxHealth = pentagonMonster.health;
+        pentagonMonster.speed = this.baseEnemySpeed * 0.6; // 느린 속도
+        pentagonMonster.isHit = false;
+        pentagonMonster.isFlashing = false;
+        pentagonMonster.knockbackX = 0;
+        pentagonMonster.knockbackY = 0;
+        pentagonMonster.isPentagon = true;
+        
+        // 오각형 몬스터 특별 속성
+        pentagonMonster.orbitAngle = Phaser.Math.FloatBetween(0, Math.PI * 2); // 랜덤한 시작 각도
+        pentagonMonster.orbitRadius = 250; // 공전 반지름
+        pentagonMonster.orbitSpeed = 1.5; // 공전 속도
+        pentagonMonster.lastShot = this.time.now; // 현재 시간으로 초기화
+        pentagonMonster.shootInterval = 2500; // 2.5초마다 발사
+        pentagonMonster.rotationSpeed = 0.02; // 회전 속도
+        
+        // 크기 조정
+        pentagonMonster.setScale(1.0);
+        pentagonMonster.body.setSize(32, 32);
+        
+        this.enemies.add(pentagonMonster);
+        this.pentagonCount++;
+        
+        console.log(`Pentagon monster #${this.pentagonCount} spawned at (${clampedX}, ${clampedY}) with ${pentagonMonster.health} health`);
+    }
 
     createEliteHealthBar(elite) {
         // 체력 바 배경
@@ -788,6 +991,7 @@ class GameScene extends Phaser.Scene {
         this.handleLightningWave(time);
         this.moveEnemies(delta);
         this.moveBullets();
+        this.moveEnemyBullets();
         this.moveEnergy();
         this.moveBulletUpgrades(delta);
         this.updateExplosions();
@@ -830,6 +1034,7 @@ class GameScene extends Phaser.Scene {
         
         // 20초마다 난이도 증가
         if (this.gameTime % 20 === 0) {
+            console.log(`Wave ${this.difficultyLevel + 1} starting...`);
             this.increaseDifficulty();
         }
     }
@@ -845,6 +1050,12 @@ class GameScene extends Phaser.Scene {
         
         // 적 기본 속도 증가
         this.baseEnemySpeed = 100 + (this.difficultyLevel * 12);
+        
+        // 5웨이브마다 오각형 몬스터 스폰
+        if (this.difficultyLevel % this.pentagonWaveInterval === 0) {
+            console.log(`Pentagon monster should spawn at wave ${this.difficultyLevel}`);
+            this.spawnPentagonMonster();
+        }
         
         // 스폰 타이머 재설정
         this.enemySpawnTimer.destroy();
@@ -1081,6 +1292,17 @@ class GameScene extends Phaser.Scene {
             }
         });
         
+        // 반경 내 적 총알도 제거
+        this.enemyBullets.children.entries.forEach(bullet => {
+            if (bullet.active) {
+                const distance = Phaser.Math.Distance.Between(playerX, playerY, bullet.x, bullet.y);
+                if (distance <= this.lightningWaveRadius) {
+                    this.createExplosion(bullet.x, bullet.y);
+                    bullet.destroy();
+                }
+            }
+        });
+        
         // 0.3초 후 무적 해제
         this.time.delayedCall(300, () => {
             this.isLightningWaveActive = false;
@@ -1119,22 +1341,30 @@ class GameScene extends Phaser.Scene {
                 nearestEnemy.x, nearestEnemy.y
             ) <= this.fireRange) {
                 
-                // 총알 개수에 따라 발사
-                const angleStep = (Math.PI * 2) / this.bulletCount;
+                // 총알 개수에 따른 발사 패턴
                 const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, nearestEnemy.x, nearestEnemy.y);
                 
                 for (let i = 0; i < this.bulletCount; i++) {
                     let bulletAngle;
-                    if (this.bulletCount === 1) {
-                        bulletAngle = baseAngle;
-                    } else {
-                        const offset = (i - (this.bulletCount - 1) / 2) * 0.15; // 0.3에서 0.15로 절반 감소
-                        bulletAngle = baseAngle + offset;
-                    }
+                    let offsetX = 0;
+                    let offsetY = 0;
                     
-                    const offsetDistance = this.bulletCount > 1 ? 20 : 0;
-                    const offsetX = Math.cos(bulletAngle + Math.PI / 2) * offsetDistance * (i - (this.bulletCount - 1) / 2);
-                    const offsetY = Math.sin(bulletAngle + Math.PI / 2) * offsetDistance * (i - (this.bulletCount - 1) / 2);
+                    if (this.bulletCount === 1) {
+                        // 1발: 정확히 적을 향해
+                        bulletAngle = baseAngle;
+                    } else if (this.bulletCount === 2) {
+                        // 2발: 같은 방향으로 촘촘하게 나란히
+                        bulletAngle = baseAngle;
+                        const sideOffset = (i === 0) ? -8 : 8; // 좌우로 8픽셀 간격
+                        offsetX = Math.cos(baseAngle + Math.PI / 2) * sideOffset;
+                        offsetY = Math.sin(baseAngle + Math.PI / 2) * sideOffset;
+                    } else {
+                        // 3발 이상: 촘촘한 방사형 패턴
+                        const spreadAngle = Math.PI / 6; // 30도 전체 확산각 (이전보다 더 좁음)
+                        const angleStep = spreadAngle / (this.bulletCount - 1);
+                        const startAngle = baseAngle - spreadAngle / 2;
+                        bulletAngle = startAngle + (i * angleStep);
+                    }
                     
                     this.createBulletWithAngle(
                         this.player.x + offsetX, 
@@ -1210,6 +1440,7 @@ class GameScene extends Phaser.Scene {
             case 'enemy1': return 1;
             case 'enemy2': return 2;
             case 'enemy3': return 3;
+            case 'pentagon_monster': return 8;
             case 'elite_monster': return 50;
             default: return 1;
         }
@@ -1220,8 +1451,131 @@ class GameScene extends Phaser.Scene {
             case 'enemy1': return this.baseEnemySpeed;
             case 'enemy2': return this.baseEnemySpeed * 1.3;
             case 'enemy3': return this.baseEnemySpeed * 0.8;
+            case 'pentagon_monster': return this.baseEnemySpeed * 0.6;
             case 'elite_monster': return this.baseEnemySpeed * 0.3;
             default: return this.baseEnemySpeed;
+        }
+    }
+    
+    handlePentagonMovement(enemy, baseAngle, delta) {
+        // 항상 회전
+        enemy.rotation += enemy.rotationSpeed;
+        
+        // 플레이어와의 거리 계산
+        const distanceToPlayer = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+        
+        // 목표 거리에 따른 이동 결정
+        const targetDistance = enemy.orbitRadius;
+        const distanceDiff = distanceToPlayer - targetDistance;
+        
+        if (Math.abs(distanceDiff) > 50) {
+            // 목표 거리와 차이가 클 때는 플레이어 쪽으로/멀어지는 방향으로 이동
+            if (distanceDiff > 0) {
+                // 너무 가까우면 멀어지기
+                const escapeAngle = baseAngle + Math.PI; // 반대 방향
+                enemy.setVelocity(
+                    Math.cos(escapeAngle) * enemy.speed * 0.8,
+                    Math.sin(escapeAngle) * enemy.speed * 0.8
+                );
+            } else {
+                // 너무 멀면 접근하기
+                enemy.setVelocity(
+                    Math.cos(baseAngle) * enemy.speed * 0.8,
+                    Math.sin(baseAngle) * enemy.speed * 0.8
+                );
+            }
+        } else {
+            // 적절한 거리에서는 원을 그리며 공전
+            enemy.orbitAngle += enemy.orbitSpeed * 0.01;
+            
+            // 공전 중심점 (플레이어 위치)
+            const orbitX = this.player.x + Math.cos(enemy.orbitAngle) * targetDistance;
+            const orbitY = this.player.y + Math.sin(enemy.orbitAngle) * targetDistance;
+            
+            // 공전 궤도를 향해 이동
+            const orbitAngle = Phaser.Math.Angle.Between(enemy.x, enemy.y, orbitX, orbitY);
+            enemy.setVelocity(
+                Math.cos(orbitAngle) * enemy.speed * 0.5,
+                Math.sin(orbitAngle) * enemy.speed * 0.5
+            );
+        }
+        
+        // 넉백 효과 적용
+        if (enemy.knockbackX !== 0 || enemy.knockbackY !== 0) {
+            enemy.setVelocity(
+                enemy.body.velocity.x + enemy.knockbackX,
+                enemy.body.velocity.y + enemy.knockbackY
+            );
+            
+            enemy.knockbackX *= 0.92;
+            enemy.knockbackY *= 0.92;
+            
+            if (Math.abs(enemy.knockbackX) < 1) enemy.knockbackX = 0;
+            if (Math.abs(enemy.knockbackY) < 1) enemy.knockbackY = 0;
+        }
+    }
+    
+    handlePentagonShooting(enemy) {
+        const currentTime = this.time.now;
+        
+        if (currentTime > enemy.lastShot + enemy.shootInterval) {
+            // 랜덤한 방향으로 총알 발사
+            const shootAngle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+            this.createEnemyBullet(enemy.x, enemy.y, shootAngle);
+            enemy.lastShot = currentTime;
+        }
+    }
+    
+    createEnemyBullet(x, y, angle) {
+        const bullet = this.physics.add.sprite(x, y, 'enemy_bullet');
+        this.enemyBullets.add(bullet);
+        
+        // 매우 느린 속도
+        const bulletSpeed = 100;
+        const velocityX = Math.cos(angle) * bulletSpeed;
+        const velocityY = Math.sin(angle) * bulletSpeed;
+        bullet.setVelocity(velocityX, velocityY);
+        
+        // 5초 후 자동 제거
+        this.time.delayedCall(5000, () => {
+            if (bullet.active) {
+                bullet.destroy();
+            }
+        });
+    }
+    
+    moveEnemyBullets() {
+        this.enemyBullets.children.entries.forEach(bullet => {
+            if (bullet.active) {
+                // 월드 경계를 벗어나면 제거
+                if (bullet.x < 0 || bullet.x > this.worldWidth || 
+                    bullet.y < 0 || bullet.y > this.worldHeight) {
+                    bullet.destroy();
+                }
+            }
+        });
+    }
+    
+    playerHitByBullet(player, bullet) {
+        // 기존 playerHit 함수와 동일한 로직
+        if (this.isDashing || this.isLightningWaveActive || this.isPlayerInvincible) {
+            bullet.destroy();
+            return;
+        }
+        
+        this.playerHealth -= 1;
+        
+        this.shakeCamera(300, 0.03); // 좀 더 약한 흔들림
+        this.createExplosion(bullet.x, bullet.y);
+        
+        // 무적 상태 시작
+        this.isPlayerInvincible = true;
+        this.createPlayerInvincibilityEffect(player);
+        
+        bullet.destroy();
+        
+        if (this.playerHealth <= 0) {
+            this.gameOver();
         }
     }
 
@@ -1229,6 +1583,23 @@ class GameScene extends Phaser.Scene {
         this.enemies.children.entries.forEach(enemy => {
             if (enemy.active) {
                 const baseAngle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+                
+                let velocityX = 0;
+                let velocityY = 0;
+                
+                if (enemy.enemyType === 'pentagon_monster') {
+                    // 오각형 몬스터는 특별한 이동 패턴
+                    this.handlePentagonMovement(enemy, baseAngle, delta);
+                    // 오각형 몬스터의 총알 발사 처리
+                    this.handlePentagonShooting(enemy);
+                    return; // 일반 이동 로직 건너뛰기
+                } else if (enemy.enemyType === 'enemy2') {
+                    // 삼각형 몬스터(enemy2)는 뾰족한 부분이 플레이어를 향하도록 회전
+                    enemy.rotation = baseAngle + Math.PI / 2; // 90도 보정 (삼각형의 진짜 머리 부분이 향하도록)
+                } else {
+                    // 다른 적들은 플레이어를 바라보도록 회전
+                    enemy.rotation = baseAngle;
+                }
                 
                 let wobble = 0;
                 if (enemy.enemyType !== 'elite_monster') {
@@ -1240,8 +1611,8 @@ class GameScene extends Phaser.Scene {
                 
                 const angle = baseAngle + wobble;
                 
-                let velocityX = Math.cos(angle) * enemy.speed;
-                let velocityY = Math.sin(angle) * enemy.speed;
+                velocityX = Math.cos(angle) * enemy.speed;
+                velocityY = Math.sin(angle) * enemy.speed;
                 
                 // 바둑알처럼 강한 넉백 슬라이드 효과
                 if (enemy.knockbackX !== 0 || enemy.knockbackY !== 0) {
@@ -1389,6 +1760,11 @@ class GameScene extends Phaser.Scene {
                 this.energy.add(energyOrb);
             }
             
+            // 디버깅: 오각형 몬스터 죽음 로그
+            if (enemy.enemyType === 'pentagon_monster') {
+                console.log(`Pentagon monster destroyed!`);
+            }
+            
             enemy.destroy();
             
             const points = this.getEnemyPoints(enemy.enemyType);
@@ -1406,6 +1782,7 @@ class GameScene extends Phaser.Scene {
             case 'enemy1': return 10;
             case 'enemy2': return 20;
             case 'enemy3': return 30;
+            case 'pentagon_monster': return 100;
             case 'elite_monster': return 500;
             default: return 10;
         }
@@ -1451,7 +1828,10 @@ class GameScene extends Phaser.Scene {
     collectEnergy(player, energyOrb) {
         energyOrb.destroy();
         
-        this.experience += 20;
+        // 레벨 30 이후에는 경험치 획득 중단
+        if (this.weaponLevel < 30) {
+            this.experience += 20;
+        }
         
         // 번개 파동파 쿨타임 0.1초 감소
         if (!this.lightningWaveReady) {
@@ -1492,7 +1872,7 @@ class GameScene extends Phaser.Scene {
 
     levelUp() {
         // 레벨업이 이미 진행 중이면 중복 실행 방지
-        if (this.isLevelingUp || this.weaponLevel >= 10) {
+        if (this.isLevelingUp || this.weaponLevel >= 30) {
             return;
         }
         
@@ -1561,8 +1941,8 @@ class GameScene extends Phaser.Scene {
     }
 
     playerHit(player, enemy) {
-        // 대쉬 중이나 번개 파동파 사용 중에는 피격 무시
-        if (this.isDashing || this.isLightningWaveActive) {
+        // 대쉬 중이나 번개 파동파 사용 중이나 무적 상태에는 피격 무시
+        if (this.isDashing || this.isLightningWaveActive || this.isPlayerInvincible) {
             enemy.destroy();
             return;
         }
@@ -1573,16 +1953,11 @@ class GameScene extends Phaser.Scene {
         this.shakeCamera(500, 0.04);
         this.createExplosion(player.x, player.y);
         
-        // 무적 시간
-        player.setTint(0xff0000);
-        player.setAlpha(0.5);
+        // 무적 상태 시작
+        this.isPlayerInvincible = true;
         
-        this.time.delayedCall(1500, () => {
-            if (player.active) {
-                player.setTint(0xffffff);
-                player.setAlpha(1);
-            }
-        });
+        // 투명한 회색으로 깜빡이는 효과 (2초간)
+        this.createPlayerInvincibilityEffect(player);
         
         if (this.playerHealth <= 0) {
             this.gameOver();
@@ -1590,6 +1965,37 @@ class GameScene extends Phaser.Scene {
             // 적을 밀어내기
             enemy.destroy();
         }
+    }
+
+    createPlayerInvincibilityEffect(player) {
+        // 깜빡이는 횟수 (2초 동안 0.2초 간격으로 10번)
+        const blinkCount = 10;
+        const blinkInterval = 200; // 0.2초
+        
+        for (let i = 0; i < blinkCount; i++) {
+            this.time.delayedCall(i * blinkInterval, () => {
+                if (player.active && this.isPlayerInvincible) {
+                    if (i % 2 === 0) {
+                        // 투명한 회색으로 설정
+                        player.setTint(0x808080); // 회색
+                        player.setAlpha(0.5); // 반투명
+                    } else {
+                        // 원래 상태로 복원 (잠깐 보이기)
+                        player.setTint(0xffffff);
+                        player.setAlpha(1);
+                    }
+                }
+            });
+        }
+        
+        // 2초 후 무적 상태 해제 및 완전 복원
+        this.time.delayedCall(blinkCount * blinkInterval, () => {
+            if (player.active) {
+                player.setTint(0xffffff);
+                player.setAlpha(1);
+                this.isPlayerInvincible = false;
+            }
+        });
     }
 
     gameOver() {
@@ -1761,7 +2167,7 @@ const config = {
             gravity: { y: 0 }
         }
     },
-    scene: [GameScene, GameOverScene]
+    scene: [TitleScene, GameScene, GameOverScene]
 };
 
 const game = new Phaser.Game(config);
