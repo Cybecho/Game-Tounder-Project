@@ -153,6 +153,37 @@ const skillDefinitions = {
         }
     },
     
+    collect_all_energy: {
+        id: 'collect_all_energy',
+        name: '에너지 수확',
+        description: '맵에 있는 모든 에너지구슬을 즉시 수집합니다',
+        category: 'active',
+        rarity: 'uncommon',
+        stackable: false,
+        probability: 0.06,
+        effect: {
+            type: 'instant',
+            action: 'collect_all_energy',
+            value: 0
+        }
+    },
+    
+    auto_shockwave_buff: {
+        id: 'auto_shockwave_buff',
+        name: '자동 파동파',
+        description: '30초동안 3초마다 자동으로 파동파를 발동합니다',
+        category: 'active',
+        rarity: 'rare',
+        stackable: false,
+        probability: 0.04,
+        effect: {
+            type: 'timed_buff',
+            buffId: 'auto_shockwave',
+            duration: 30000,
+            modifiers: []
+        }
+    },
+    
     // === Passive 스킬들 (35%) ===
     
     bullet_count_increase: {
@@ -242,6 +273,62 @@ const skillDefinitions = {
     
     // === Skill 스킬들 (15%) ===
     
+    dash_knockback: {
+        id: 'dash_knockback',
+        name: '돌진',
+        description: '대쉬 경로의 적들에게 강한 넉백을 줍니다',
+        category: 'skill',
+        rarity: 'common',
+        stackable: false,
+        probability: 0.05,
+        effect: {
+            type: 'special_behavior',
+            behavior: 'dash_knockback'
+        }
+    },
+    
+    dash_attack: {
+        id: 'dash_attack',
+        name: '돌격',
+        description: '대쉬 경로의 적들을 강하게 공격합니다',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: false,
+        probability: 0.03,
+        effect: {
+            type: 'special_behavior',
+            behavior: 'dash_damage'
+        }
+    },
+    
+    dash_explosion: {
+        id: 'dash_explosion',
+        name: '착지 폭발',
+        description: '대쉬 끝에 큰 폭발 공격을 가합니다',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: false,
+        probability: 0.03,
+        effect: {
+            type: 'special_behavior',
+            behavior: 'dash_explosion'
+        }
+    },
+    
+    dash_lightning: {
+        id: 'dash_lightning',
+        name: '번개 대쉬',
+        description: '대쉬 경로의 적들을 감전시킵니다',
+        category: 'skill',
+        rarity: 'uncommon',
+        stackable: false,
+        probability: 0.04,
+        effect: {
+            type: 'special_behavior',
+            behavior: 'dash_electrify'
+        }
+    },
+    
     dash_efficiency: {
         id: 'dash_efficiency',
         name: '순간이동 숙련',
@@ -290,6 +377,20 @@ const skillDefinitions = {
             target: 'lightningWaveCooldown',
             operation: 'multiply',
             value: 0.8
+        }
+    },
+    
+    double_shockwave: {
+        id: 'double_shockwave',
+        name: '이중 충격',
+        description: '파동파가 2연속으로 발동됩니다 (첫번째 → 2초 후 두배 크기)',
+        category: 'skill',
+        rarity: 'legendary',
+        stackable: false,
+        probability: 0.02,
+        effect: {
+            type: 'special_behavior',
+            behavior: 'double_shockwave'
         }
     }
 };
@@ -528,12 +629,14 @@ class GameScene extends Phaser.Scene {
         // 레벨업 시스템 보호 플래그들
         this.isLevelingUp = false; // 레벨업 진행 중 중복 방지
         this.isSkillSelectionActive = false; // 스킬 선택 중 게임 정지
+        this.doubleShockwaveActive = false; // 버그 수정: 이중 파동파 중복 실행 방지
         
         // 스킬 시스템
         this.skillSystem = {
             // 선택된 스킬들
             selectedSkills: new Set(),
             skillStacks: new Map(),
+            specialBehaviors: new Set(),
             
             // 액티브 스킬 상태
             barrierCharges: 0,
@@ -1015,6 +1118,9 @@ class GameScene extends Phaser.Scene {
         // 착지 폭발 효과
         this.createExplosion(clampedTargetX, clampedTargetY);
         
+        // 대쉬 스킬 효과 발동
+        this.triggerDashSkillEffects(startX, startY, clampedTargetX, clampedTargetY, angle);
+        
         // 대쉬 효과 지속 시간 (200ms로 단축)
         this.time.delayedCall(200, () => {
             this.isDashing = false;
@@ -1022,6 +1128,9 @@ class GameScene extends Phaser.Scene {
                 this.player.setTint(0xffffff);
                 this.player.setAlpha(1);
                 this.player.setScale(1);
+                
+                // 버그 수정: 완전한 물리 상태 복구
+                this.restorePlayerPhysics();
             }
         });
     }
@@ -1471,6 +1580,9 @@ class GameScene extends Phaser.Scene {
     }
 
     updateGameTime() {
+        // 스킬 선택 중이면 게임 시간 업데이트 중지
+        if (this.isSkillSelectionActive) return;
+        
         this.gameTime += 1;
         
         // 20초마다 난이도 증가
@@ -1774,6 +1886,9 @@ class GameScene extends Phaser.Scene {
                 }
             }
         });
+        
+        // 파동파 스킬 효과 발동
+        this.triggerLightningWaveSkillEffects(playerX, playerY);
         
         // 0.3초 후 무적 해제
         this.time.delayedCall(300, () => {
@@ -2730,6 +2845,18 @@ class GameScene extends Phaser.Scene {
         // 물리 시뮬레이션 일시정지
         this.physics.world.pause();
         
+        // 모든 중요한 타이머들 일시정지
+        if (this.enemySpawnTimer) {
+            this.enemySpawnTimer.paused = true;
+        }
+        
+        if (this.autoShockwaveTimer) {
+            this.autoShockwaveTimer.paused = true;
+        }
+        
+        // ⚠️ Scene.pause() 제거 - 데드락 방지
+        // 대신 게임 업데이트만 차단
+        
         // 게임 화면 어둡게 하기
         this.gameOverlay = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.5)
             .setScrollFactor(0)
@@ -2737,6 +2864,8 @@ class GameScene extends Phaser.Scene {
             
         // 스킬 선택 중임을 표시하는 플래그
         this.isSkillSelectionActive = true;
+        
+        console.log('🔄 게임 일시정지: 스킬 선택 중');
     }
     
     generateRandomSkills(count = 3) {
@@ -2969,6 +3098,9 @@ class GameScene extends Phaser.Scene {
             case 'timed_buff':
                 this.applyTimedBuff(skill);
                 break;
+            case 'special_behavior':
+                this.applySpecialBehavior(skill);
+                break;
         }
         
         // 선택 피드백
@@ -2999,6 +3131,9 @@ class GameScene extends Phaser.Scene {
                 this.updateUI(); // UI 전체 업데이트
                 console.log(`체력 회복: ${this.playerHealth}`);
                 break;
+            case 'collect_all_energy':
+                this.collectAllEnergyOrbs();
+                break;
         }
     }
     
@@ -3028,11 +3163,14 @@ class GameScene extends Phaser.Scene {
         
         this.skillSystem.activeBuffs.set(buffId, buffData);
         
-        // 시각적 피드백
+        // 시각적 피드백 및 특별 버프 처리
         if (buffId === 'agility_boost') {
             this.player.setTint(0x00ff88);
         } else if (buffId === 'speed_boost') {
             this.player.setTint(0x00aaff);
+        } else if (buffId === 'auto_shockwave') {
+            this.player.setTint(0xffaa00);
+            this.startAutoShockwaveTimer(effect.duration);
         }
         
         // 만료 타이머 설정
@@ -3052,6 +3190,13 @@ class GameScene extends Phaser.Scene {
             const [, , target] = modifierId.split('_');
             this.statModifierEngine.removeModifier(target, modifierId);
         });
+        
+        // 버그 수정: 자동 파동파 버프 종료 시 타이머 정리
+        if (buffId === 'auto_shockwave' && this.autoShockwaveTimer) {
+            this.autoShockwaveTimer.destroy();
+            this.autoShockwaveTimer = null;
+            console.log('자동 파동파 타이머 정리됨');
+        }
         
         this.skillSystem.activeBuffs.delete(buffId);
         
@@ -3111,13 +3256,802 @@ class GameScene extends Phaser.Scene {
             this.gameOverlay = null;
         }
         
+        // 모든 타이머들 재개
+        if (this.enemySpawnTimer) {
+            this.enemySpawnTimer.paused = false;
+        }
+        
+        if (this.autoShockwaveTimer) {
+            this.autoShockwaveTimer.paused = false;
+        }
+        
         // 물리 시뮬레이션 재개
         this.physics.world.resume();
+        
+        console.log('▶️ 게임 재개: 스킬 선택 완료');
         
         // 레벨업 완료
         this.time.delayedCall(1000, () => {
             this.isLevelingUp = false;
         });
+    }
+    
+    // 에너지 구슬 전체 수집 기능
+    collectAllEnergyOrbs() {
+        let collectedCount = 0;
+        
+        // 모든 에너지 구슬을 순회하며 수집
+        this.energy.children.entries.forEach(orb => {
+            if (orb.active) {
+                this.collectEnergy(this.player, orb);
+                collectedCount++;
+            }
+        });
+        
+        // 시각적 피드백
+        if (collectedCount > 0) {
+            this.showSkillAcquiredText({
+                name: `에너지 ${collectedCount}개 수집!`
+            });
+            
+            // 카메라 흔들림 효과
+            this.shakeCamera(200, 0.015);
+        }
+        
+        console.log(`에너지 구슬 ${collectedCount}개 수집 완료`);
+    }
+    
+    // 자동 파동파 타이머 시작
+    startAutoShockwaveTimer(duration) {
+        // 이미 자동 파동파가 있다면 제거
+        if (this.autoShockwaveTimer) {
+            this.autoShockwaveTimer.destroy();
+        }
+        
+        let remainingTime = duration;
+        const interval = 3000; // 3초마다
+        
+        this.autoShockwaveTimer = this.time.addEvent({
+            delay: interval,
+            callback: () => {
+                // 버그 수정: 스킬 선택 중에는 자동 파동파 비활성화
+                if (this.lightningWaveReady && this.player && this.player.active && !this.isSkillSelectionActive) {
+                    this.performLightningWave();
+                    
+                    // 자동 발동 시각적 효과
+                    this.showAutoSkillText('자동 파동파!');
+                }
+                
+                remainingTime -= interval;
+                if (remainingTime <= 0) {
+                    this.autoShockwaveTimer.destroy();
+                    this.autoShockwaveTimer = null;
+                }
+            },
+            repeat: Math.floor(duration / interval) - 1
+        });
+        
+        console.log(`자동 파동파 시작: ${duration}ms 동안`);
+    }
+    
+    // 자동 스킬 텍스트 표시
+    showAutoSkillText(text) {
+        const autoText = this.add.text(
+            this.player.x, 
+            this.player.y - 50, 
+            text, 
+            {
+                fontSize: '16px',
+                color: '#ffaa00',
+                stroke: '#000000',
+                strokeThickness: 2,
+                fontWeight: 'bold'
+            }
+        ).setOrigin(0.5);
+        
+        // 애니메이션
+        this.tweens.add({
+            targets: autoText,
+            y: autoText.y - 30,
+            alpha: 0,
+            duration: 1500,
+            ease: 'Power2',
+            onComplete: () => autoText.destroy()
+        });
+    }
+    
+    // 특별 행동 스킬 처리
+    applySpecialBehavior(skill) {
+        const behavior = skill.effect.behavior;
+        
+        // 스킬 시스템에 저장
+        if (!this.skillSystem.specialBehaviors) {
+            this.skillSystem.specialBehaviors = new Set();
+        }
+        this.skillSystem.specialBehaviors.add(behavior);
+        
+        console.log(`특별 행동 스킬 활성화: ${behavior}`);
+    }
+    
+    // 대쉬 스킬 효과 처리 (완전 재설계)
+    triggerDashSkillEffects(startX, startY, endX, endY, angle) {
+        if (!this.skillSystem.specialBehaviors) {
+            console.log('🚫 대쉬 스킬: specialBehaviors가 초기화되지 않음');
+            return;
+        }
+        
+        const behaviors = this.skillSystem.specialBehaviors;
+        console.log('🎯 대쉬 스킬 체크:', Array.from(behaviors));
+        
+        let skillActivated = false;
+        
+        // 대쉬 넉백 스킬
+        if (behaviors.has('dash_knockback')) {
+            this.applyDashKnockback(startX, startY, endX, endY);
+            this.showDashSkillActivation('넉백 대쉬!', 0x00ff00);
+            skillActivated = true;
+        }
+        
+        // 대쉬 공격 스킬
+        if (behaviors.has('dash_damage')) {
+            this.applyDashDamage(startX, startY, endX, endY);
+            this.showDashSkillActivation('공격 대쉬!', 0xff4444);
+            skillActivated = true;
+        }
+        
+        // 대쉬 폭발 스킬
+        if (behaviors.has('dash_explosion')) {
+            this.applyDashExplosion(endX, endY);
+            this.showDashSkillActivation('폭발 대쉬!', 0xff6600);
+            skillActivated = true;
+        }
+        
+        // 대쉬 번개 스킬
+        if (behaviors.has('dash_electrify')) {
+            this.applyDashElectrify(startX, startY, endX, endY);
+            this.showDashSkillActivation('번개 대쉬!', 0x00aaff);
+            skillActivated = true;
+        }
+        
+        if (!skillActivated) {
+            console.log('⚠️ 대쉬 스킬이 하나도 활성화되지 않음');
+        }
+    }
+    
+    // 파동파 스킬 효과 처리
+    triggerLightningWaveSkillEffects(playerX, playerY) {
+        if (!this.skillSystem.specialBehaviors) return;
+        
+        const behaviors = this.skillSystem.specialBehaviors;
+        
+        // 이중 파동파 스킬
+        if (behaviors.has('double_shockwave')) {
+            this.applyDoubleShockwave(playerX, playerY);
+        }
+    }
+    
+    // 대쉬 넉백 스킬 구현 (완전 재설계)
+    applyDashKnockback(startX, startY, endX, endY) {
+        console.log('🚀 대쉬 넉백 스킬 발동!');
+        
+        // 대쉬 경로에 시각적 트레일 생성
+        this.createDashTrail(startX, startY, endX, endY, 0x00ff00, '넉백');
+        
+        const hitEnemies = new Set();
+        const segments = 15; // 더 세밀한 체크
+        
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const checkX = startX + (endX - startX) * t;
+            const checkY = startY + (endY - startY) * t;
+            
+            // 경로 주변의 적들 찾기
+            this.enemies.children.entries.forEach(enemy => {
+                if (!enemy || !enemy.active || hitEnemies.has(enemy)) return;
+                
+                const distance = Phaser.Math.Distance.Between(checkX, checkY, enemy.x, enemy.y);
+                if (distance <= 80) { // 더 넓은 판정 범위
+                    hitEnemies.add(enemy);
+                    
+                    // 강한 넉백 적용
+                    const knockbackAngle = Phaser.Math.Angle.Between(checkX, checkY, enemy.x, enemy.y);
+                    const knockbackForce = 1200; // 더 강한 넉백
+                    
+                    if (enemy.body && enemy.body.velocity) {
+                        enemy.setVelocity(
+                            enemy.body.velocity.x + Math.cos(knockbackAngle) * knockbackForce,
+                            enemy.body.velocity.y + Math.sin(knockbackAngle) * knockbackForce
+                        );
+                    }
+                    
+                    // 강화된 시각 효과
+                    this.createEnhancedKnockbackEffect(enemy.x, enemy.y, knockbackAngle);
+                }
+            });
+        }
+        
+        console.log(`✅ 대쉬 넉백: ${hitEnemies.size}명 적중`);
+    }
+    
+    // 대쉬 공격 스킬 구현 (완전 재설계)
+    applyDashDamage(startX, startY, endX, endY) {
+        console.log('⚔️ 대쉬 공격 스킬 발동!');
+        
+        // 공격 트레일 생성
+        this.createDashTrail(startX, startY, endX, endY, 0xff4444, '공격');
+        
+        const hitEnemies = new Set();
+        const segments = 15;
+        
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const checkX = startX + (endX - startX) * t;
+            const checkY = startY + (endY - startY) * t;
+            
+            this.enemies.children.entries.forEach(enemy => {
+                if (!enemy || !enemy.active || hitEnemies.has(enemy)) return;
+                
+                const distance = Phaser.Math.Distance.Between(checkX, checkY, enemy.x, enemy.y);
+                if (distance <= 75) {
+                    hitEnemies.add(enemy);
+                    
+                    // 강한 대미지 적용
+                    const damage = 4;
+                    enemy.health -= damage;
+                    
+                    // 강화된 공격 효과
+                    this.createSlashEffect(enemy.x, enemy.y);
+                    this.showDamageNumber(enemy.x, enemy.y - 30, damage, 0xff4444);
+                    
+                    // 적 번쩍임 효과
+                    enemy.setTint(0xff4444);
+                    this.time.delayedCall(200, () => {
+                        if (enemy.active) enemy.clearTint();
+                    });
+                    
+                    if (enemy.health <= 0) {
+                        // 적 제거 및 점수/에너지 처리
+                        this.createExplosion(enemy.x, enemy.y);
+                        const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                        this.energy.add(energyOrb);
+                        
+                        const points = this.getEnemyPoints(enemy.enemyType);
+                        this.score += points;
+                        
+                        enemy.destroy();
+                    }
+                }
+            });
+        }
+        
+        console.log(`✅ 대쉬 공격: ${hitEnemies.size}명 ${hitEnemies.size * 4} 데미지`);
+    }
+    
+    // 대쉬 폭발 스킬 구현 (완전 재설계)
+    applyDashExplosion(endX, endY) {
+        console.log('💥 대쉬 폭발 스킬 발동!');
+        
+        const explosionRadius = 180; // 더 큰 폭발 범위
+        let hitCount = 0;
+        let totalDamage = 0;
+        
+        // 메인 폭발 효과 먼저 생성
+        this.createMegaExplosion(endX, endY, explosionRadius);
+        
+        // 화면 흔들림
+        this.cameras.main.shake(500, 0.08);
+        
+        // 폭발 범위 내 적들에게 데미지
+        this.enemies.children.entries.forEach(enemy => {
+            if (!enemy || !enemy.active) return;
+            
+            const distance = Phaser.Math.Distance.Between(endX, endY, enemy.x, enemy.y);
+            if (distance <= explosionRadius) {
+                hitCount++;
+                
+                // 거리에 비례하여 데미지 감소
+                const damage = Math.ceil(6 * (1 - distance / explosionRadius)) + 1;
+                enemy.health -= damage;
+                totalDamage += damage;
+                
+                // 폭발 넉백
+                const knockbackForce = 800 * (1 - distance / explosionRadius);
+                const angle = Phaser.Math.Angle.Between(endX, endY, enemy.x, enemy.y);
+                
+                if (enemy.body && enemy.body.velocity) {
+                    enemy.setVelocity(
+                        enemy.body.velocity.x + Math.cos(angle) * knockbackForce,
+                        enemy.body.velocity.y + Math.sin(angle) * knockbackForce
+                    );
+                }
+                
+                // 개별 폭발 효과
+                this.time.delayedCall(Phaser.Math.Between(0, 200), () => {
+                    this.createExplosion(enemy.x, enemy.y);
+                });
+                
+                // 데미지 표시
+                this.showDamageNumber(enemy.x, enemy.y - 40, damage, 0xff6600);
+                
+                if (enemy.health <= 0) {
+                    // 적 제거 및 점수/에너지 처리 (표준 패턴)
+                    this.createExplosion(enemy.x, enemy.y);
+                    const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                    this.energy.add(energyOrb);
+                    
+                    const points = this.getEnemyPoints(enemy.enemyType);
+                    this.score += points;
+                    
+                    enemy.destroy();
+                }
+            }
+        });
+        
+        // 적 총알도 제거
+        if (this.enemyBullets) {
+            this.enemyBullets.children.entries.forEach(bullet => {
+                if (bullet && bullet.active) {
+                    const distance = Phaser.Math.Distance.Between(endX, endY, bullet.x, bullet.y);
+                    if (distance <= explosionRadius) {
+                        this.createExplosion(bullet.x, bullet.y);
+                        bullet.destroy();
+                    }
+                }
+            });
+        }
+        
+        console.log(`✅ 대쉬 폭발: ${hitCount}명 적중, ${totalDamage} 총 데미지`);
+    }
+    
+    // 대쉬 번개 스킬 구현 (완전 재설계)
+    applyDashElectrify(startX, startY, endX, endY) {
+        console.log('⚡ 대쉬 번개 스킬 발동!');
+        
+        // 번개 트레일 생성
+        this.createDashTrail(startX, startY, endX, endY, 0x00aaff, '번개');
+        
+        const hitEnemies = new Set();
+        const segments = 12;
+        
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const checkX = startX + (endX - startX) * t;
+            const checkY = startY + (endY - startY) * t;
+            
+            this.enemies.children.entries.forEach(enemy => {
+                if (!enemy || !enemy.active || hitEnemies.has(enemy)) return;
+                
+                const distance = Phaser.Math.Distance.Between(checkX, checkY, enemy.x, enemy.y);
+                if (distance <= 85) {
+                    hitEnemies.add(enemy);
+                    
+                    // 번개 데미지
+                    const damage = 3;
+                    enemy.health -= damage;
+                    
+                    // 강화된 번개 효과
+                    this.createEnhancedLightningEffect(checkX, checkY, enemy.x, enemy.y);
+                    this.showDamageNumber(enemy.x, enemy.y - 30, damage, 0x00aaff);
+                    
+                    // 감전 효과 (번쩍이는 효과)
+                    this.applyElectrifyEffect(enemy);
+                    
+                    if (enemy.health <= 0) {
+                        // 적 제거 및 점수/에너지 처리
+                        this.createExplosion(enemy.x, enemy.y);
+                        const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                        this.energy.add(energyOrb);
+                        
+                        const points = this.getEnemyPoints(enemy.enemyType);
+                        this.score += points;
+                        
+                        enemy.destroy();
+                    }
+                }
+            });
+        }
+        
+        // 체인 라이트닝 효과 (히트된 적들 간에 번개 연결)
+        if (hitEnemies.size > 1) {
+            this.createChainLightning(Array.from(hitEnemies));
+        }
+        
+        console.log(`✅ 대쉬 번개: ${hitEnemies.size}명 감전, ${hitEnemies.size * 3} 데미지`);
+    }
+    
+    // 이중 파동파 스킬 구현
+    applyDoubleShockwave(playerX, playerY) {
+        // 버그 수정: 중복 실행 방지 및 게임 상태 체크 추가
+        if (!this.player || !this.player.active || this.isSkillSelectionActive || this.doubleShockwaveActive) {
+            return;
+        }
+        
+        // 중복 실행 방지 플래그 설정
+        this.doubleShockwaveActive = true;
+        
+        console.log('이중 파동파 스킬 시작 (2초 후 두 번째 발동 예약)');
+        
+        // 2초 후 두 번째 파동파 (두배 크기)
+        this.time.delayedCall(2000, () => {
+            // 버그 수정: 다시 한번 게임 상태 체크
+            if (!this.player || !this.player.active || this.isSkillSelectionActive || this.scene.isPaused()) {
+                this.doubleShockwaveActive = false; // 플래그 리셋
+                return;
+            }
+            
+            const secondPlayerX = this.player.x;
+            const secondPlayerY = this.player.y;
+            const enhancedRadius = this.lightningWaveRadius * 2; // 두배 크기
+            
+            console.log('이중 파동파 두 번째 발동');
+            
+            // 강화된 화면 플래시
+            const flashRect = this.add.rectangle(400, 300, 800, 600, 0xff9900, 0.8).setScrollFactor(0);
+            this.tweens.add({
+                targets: flashRect,
+                alpha: 0,
+                duration: 150,
+                onComplete: () => flashRect.destroy()
+            });
+            
+            // 확대된 원형 효과
+            this.createEnhancedPushWaveEffect(secondPlayerX, secondPlayerY, enhancedRadius);
+            
+            // 강한 흔들림
+            this.cameras.main.shake(400, 0.1);
+            
+            // 버그 수정: try-catch로 에러 방지
+            try {
+                // 범위 내 적들 제거 (더 강력한 데미지)
+                this.enemies.children.entries.forEach(enemy => {
+                    if (!enemy || !enemy.active) return;
+                    
+                    const distance = Phaser.Math.Distance.Between(secondPlayerX, secondPlayerY, enemy.x, enemy.y);
+                    if (distance <= enhancedRadius) {
+                        // 거리에 비례하여 더 강한 데미지
+                        const damage = Math.ceil(4 * (1 - distance / enhancedRadius));
+                        enemy.health -= damage;
+                        
+                        // 강한 넉백
+                        const knockbackForce = 1200;
+                        const angle = Phaser.Math.Angle.Between(secondPlayerX, secondPlayerY, enemy.x, enemy.y);
+                        
+                        if (enemy.body && enemy.body.velocity) {
+                            enemy.setVelocity(
+                                enemy.body.velocity.x + Math.cos(angle) * knockbackForce,
+                                enemy.body.velocity.y + Math.sin(angle) * knockbackForce
+                            );
+                        }
+                        
+                        this.createExplosion(enemy.x, enemy.y);
+                        
+                        if (enemy.health <= 0) {
+                            // 적 제거 및 점수/에너지 처리
+                            this.createExplosion(enemy.x, enemy.y);
+                            const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                            this.energy.add(energyOrb);
+                            
+                            const points = this.getEnemyPoints(enemy.enemyType);
+                            this.score += points;
+                            
+                            enemy.destroy();
+                        }
+                    }
+                });
+                
+                // 적 총알도 제거
+                if (this.enemyBullets && this.enemyBullets.children) {
+                    this.enemyBullets.children.entries.forEach(bullet => {
+                        if (bullet && bullet.active) {
+                            const distance = Phaser.Math.Distance.Between(secondPlayerX, secondPlayerY, bullet.x, bullet.y);
+                            if (distance <= enhancedRadius) {
+                                this.createExplosion(bullet.x, bullet.y);
+                                bullet.destroy();
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('이중 파동파 실행 중 오류:', error);
+            }
+            
+            // 실행 완료 후 플래그 리셋
+            this.doubleShockwaveActive = false;
+        });
+    }
+    
+    // 대형 폭발 효과 생성
+    createMassiveExplosion(x, y, radius) {
+        // 여러 개의 동심원 폭발 효과
+        for (let i = 0; i < 5; i++) {
+            const explosionGraphics = this.add.graphics();
+            const randomRadius = radius * (0.6 + Math.random() * 0.4);
+            
+            explosionGraphics.fillStyle(0xff6600, 0.8 - i * 0.15);
+            explosionGraphics.fillCircle(x, y, 20);
+            
+            this.tweens.add({
+                targets: explosionGraphics,
+                scaleX: randomRadius / 20,
+                scaleY: randomRadius / 20,
+                alpha: 0,
+                duration: 800 + i * 100,
+                delay: i * 50,
+                ease: 'Power2',
+                onComplete: () => explosionGraphics.destroy()
+            });
+        }
+    }
+    
+    // 확대된 파동 효과 생성
+    createEnhancedPushWaveEffect(centerX, centerY, radius) {
+        const waveRing = this.add.graphics();
+        waveRing.x = centerX;
+        waveRing.y = centerY;
+        waveRing.lineStyle(12, 0xff9900, 1.0);
+        waveRing.strokeCircle(0, 0, 40);
+        
+        this.tweens.add({
+            targets: waveRing,
+            scaleX: radius / 40,
+            scaleY: radius / 40,
+            alpha: 0,
+            duration: 1000,
+            ease: 'Power2',
+            onComplete: () => waveRing.destroy()
+        });
+    }
+    
+    // 번개 볼트 이효과 생성
+    createLightningBolt(startX, startY, endX, endY) {
+        const lightning = this.add.graphics();
+        lightning.lineStyle(3, 0x00aaff, 1);
+        
+        // 지그재그 번개 볼트
+        const segments = 8;
+        lightning.beginPath();
+        lightning.moveTo(startX, startY);
+        
+        for (let i = 1; i <= segments; i++) {
+            const t = i / segments;
+            const x = startX + (endX - startX) * t + (Math.random() - 0.5) * 30;
+            const y = startY + (endY - startY) * t + (Math.random() - 0.5) * 30;
+            lightning.lineTo(x, y);
+        }
+        
+        lightning.lineTo(endX, endY);
+        lightning.strokePath();
+        
+        // 번개 사라지기
+        this.tweens.add({
+            targets: lightning,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => lightning.destroy()
+        });
+    }
+    
+    // ==================== 대쉬 스킬 물리 복구 시스템 ====================
+    
+    // 플레이어 물리 상태 완전 복구
+    restorePlayerPhysics() {
+        if (!this.player || !this.player.active) return;
+        
+        console.log('🔧 플레이어 물리 상태 복구 중...');
+        
+        try {
+            // 속도 완전 초기화
+            this.player.setVelocity(0, 0);
+            this.player.setAcceleration(0, 0); // 가속도도 초기화
+            this.player.setAngularVelocity(0);
+            
+            // 드래그 및 최대 속도 복구
+            this.player.body.setDrag(this.playerDrag || 900);
+            this.player.body.setMaxVelocity(this.playerSpeed || 400);
+            
+            // 충돌 감지 복구
+            this.player.body.setEnable(true);
+            
+            // 물리 바디 활성화
+            if (!this.player.body.enable) {
+                this.physics.world.enableBody(this.player);
+            }
+            
+            // 플레이어 상태 정리
+            this.player.clearTint();
+            this.player.setAlpha(1);
+            this.player.setScale(1);
+            
+            // 입력 처리 복구 (중요!)
+            if (this.cursors) this.cursors.enabled = true;
+            if (this.wasd) this.wasd.enabled = true;
+            
+            console.log('✅ 플레이어 물리 상태 복구 완료');
+            
+        } catch (error) {
+            console.error('❌ 플레이어 물리 복구 중 오류:', error);
+            
+            // 페일세이프: 기본값으로 강제 설정
+            this.player.setVelocity(0, 0);
+            this.player.setAcceleration(0, 0);
+            this.player.body.setDrag(900);
+            this.player.body.setMaxVelocity(400);
+            this.player.clearTint();
+            this.player.setAlpha(1);
+            this.player.setScale(1);
+        }
+    }
+    
+    // 대쉬 스킬 활성화 알림 (간단한 버전)
+    showDashSkillActivation(text, color) {
+        const skillText = this.add.text(
+            this.player.x, 
+            this.player.y - 80, 
+            text, 
+            {
+                fontSize: '24px',
+                color: `#${color.toString(16).padStart(6, '0')}`,
+                stroke: '#000000',
+                strokeThickness: 4,
+                fontWeight: 'bold'
+            }
+        ).setOrigin(0.5).setDepth(1000);
+
+        // 텍스트 애니메이션
+        this.tweens.add({
+            targets: skillText,
+            y: skillText.y - 60,
+            alpha: 0,
+            scaleX: 1.5,
+            scaleY: 1.5,
+            duration: 1500,
+            ease: 'Power2',
+            onComplete: () => skillText.destroy()
+        });
+    }
+    
+    // 대쉬 트레일 효과 (간단한 버전)
+    createDashTrail(startX, startY, endX, endY, color, type) {
+        const trail = this.add.graphics();
+        trail.lineStyle(8, color, 0.8);
+        trail.beginPath();
+        trail.moveTo(startX, startY);
+        trail.lineTo(endX, endY);
+        trail.strokePath();
+        
+        this.tweens.add({
+            targets: trail,
+            alpha: 0,
+            duration: 600,
+            onComplete: () => trail.destroy()
+        });
+    }
+    
+    // 강화된 넉백 효과 (간단한 버전)
+    createEnhancedKnockbackEffect(x, y, angle) {
+        const impact = this.add.graphics();
+        impact.lineStyle(6, 0x00ff00, 1);
+        impact.strokeCircle(x, y, 20);
+        
+        this.tweens.add({
+            targets: impact,
+            scaleX: 2,
+            scaleY: 2,
+            alpha: 0,
+            duration: 400,
+            onComplete: () => impact.destroy()
+        });
+    }
+    
+    // 슬래시 효과 (간단한 버전)
+    createSlashEffect(x, y) {
+        const slash = this.add.graphics();
+        slash.lineStyle(6, 0xff4444, 1);
+        slash.beginPath();
+        slash.moveTo(x - 25, y - 25);
+        slash.lineTo(x + 25, y + 25);
+        slash.moveTo(x + 25, y - 25);
+        slash.lineTo(x - 25, y + 25);
+        slash.strokePath();
+        
+        this.tweens.add({
+            targets: slash,
+            scaleX: 1.5,
+            scaleY: 1.5,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => slash.destroy()
+        });
+    }
+    
+    // 메가 폭발 효과 (간단한 버전)
+    createMegaExplosion(x, y, radius) {
+        const explosion = this.add.graphics();
+        explosion.fillStyle(0xff6600, 0.8);
+        explosion.fillCircle(x, y, 30);
+        
+        this.tweens.add({
+            targets: explosion,
+            scaleX: radius / 30,
+            scaleY: radius / 30,
+            alpha: 0,
+            duration: 600,
+            onComplete: () => explosion.destroy()
+        });
+    }
+    
+    // 강화된 번개 효과 (간단한 버전)
+    createEnhancedLightningEffect(startX, startY, endX, endY) {
+        const lightning = this.add.graphics();
+        lightning.lineStyle(4, 0x00aaff, 1);
+        lightning.beginPath();
+        lightning.moveTo(startX, startY);
+        lightning.lineTo(endX, endY);
+        lightning.strokePath();
+        
+        this.tweens.add({
+            targets: lightning,
+            alpha: 0,
+            duration: 200,
+            onComplete: () => lightning.destroy()
+        });
+    }
+    
+    // 감전 효과 (간단한 버전)
+    applyElectrifyEffect(enemy) {
+        if (!enemy.active) return;
+        
+        // 번쩍이는 효과
+        let flickerCount = 0;
+        const flickerTimer = this.time.addEvent({
+            delay: 100,
+            callback: () => {
+                if (enemy.active) {
+                    enemy.setTint(flickerCount % 2 === 0 ? 0x00aaff : 0xffffff);
+                    flickerCount++;
+                    if (flickerCount >= 6) {
+                        enemy.clearTint();
+                        flickerTimer.destroy();
+                    }
+                }
+            },
+            repeat: 5
+        });
+    }
+    
+    // 데미지 숫자 표시 (간단한 버전)
+    showDamageNumber(x, y, damage, color) {
+        const damageText = this.add.text(x, y, `-${damage}`, {
+            fontSize: '16px',
+            color: `#${color.toString(16).padStart(6, '0')}`,
+            stroke: '#000000',
+            strokeThickness: 2,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        this.tweens.add({
+            targets: damageText,
+            y: y - 40,
+            alpha: 0,
+            duration: 800,
+            onComplete: () => damageText.destroy()
+        });
+    }
+    
+    // 체인 라이트닝 효과 (간단한 버전)
+    createChainLightning(enemies) {
+        if (!enemies || enemies.length < 2) return;
+        
+        for (let i = 0; i < enemies.length - 1; i++) {
+            const current = enemies[i];
+            const next = enemies[i + 1];
+            
+            if (current && current.active && next && next.active) {
+                this.time.delayedCall(i * 100, () => {
+                    this.createEnhancedLightningEffect(current.x, current.y, next.x, next.y);
+                });
+            }
+        }
     }
 }
 
