@@ -103,6 +103,42 @@ export const skillDefinitions = {
         }
     },
     
+    // === 전기 스킬들 (새로 추가) ===
+    
+    electric_chain: {
+        id: 'electric_chain',
+        name: '전기 체인',
+        description: '50% 확률로 피격된 적 주변 다른 적에 전기 체인 공격을 1회 전이합니다 (최대3회 전이)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.04,
+        effect: {
+            type: 'special_behavior',
+            action: 'electric_chain_attack',
+            value: 1
+        }
+    },
+    
+    random_lightning: {
+        id: 'random_lightning',
+        name: '천둥번개',
+        description: '랜덤한 위치에 번개가 내려칩니다. 중첩될때마다 더 자주, 더 많이 발생합니다 (최대 3회)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.03,
+        effect: {
+            type: 'timed_buff',
+            buffId: 'random_lightning_storm',
+            duration: 20000,
+            action: 'activate_random_lightning',
+            value: 1
+        }
+    },
+    
     // === Passive 스킬들 (35%) ===
     
     bullet_count_increase: {

@@ -392,6 +392,43 @@ const skillDefinitions = {
             type: 'special_behavior',
             behavior: 'double_shockwave'
         }
+    },
+    
+    // === 전기 스킬들 (새로 추가) ===
+    
+    electric_chain: {
+        id: 'electric_chain',
+        name: '전기 체인',
+        description: '50% 확률로 피격된 적 주변 다른 적에 전기 체인 공격을 1회 전이합니다 (최대3회 전이)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.04,
+        effect: {
+            type: 'special_behavior',
+            action: 'electric_chain_attack',
+            value: 1
+        }
+    },
+    
+    random_lightning: {
+        id: 'random_lightning',
+        name: '천둥번개',
+        description: '랜덤한 위치에 번개가 내려칩니다. 중첩될때마다 더 자주, 더 많이 발생합니다 (최대 3회)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.03,
+        effect: {
+            type: 'timed_buff',
+            buffId: 'random_lightning_storm',
+            duration: 999999999, // 거의 영구적 (게임오버까지 지속)
+            action: 'activate_random_lightning',
+            value: 1,
+            modifiers: []
+        }
     }
 };
 
@@ -769,6 +806,67 @@ class GameScene extends Phaser.Scene {
         
         // 능력치 수정자 엔진 초기화
         this.statModifierEngine = new StatModifierEngine(this);
+        
+        // ⚡ 새로운 전기 시스템들 초기화
+        this.chainLightningSystem = new ChainLightningSystem(this);
+        
+        // 전기 스킬 시스템 (간단한 구현)
+        this.electricSkillSystem = {
+            activeRandomLightning: null,
+            lightningStrikeCount: 0,
+            
+            // 전기 체인 공격 트리거
+            triggerElectricChain: (hitEnemy, skillLevel = 1) => {
+                if (Math.random() > 0.5) return false; // 50% 확률
+                
+                const chainConfig = {
+                    maxJumps: Math.min(3, skillLevel + 2),
+                    maxRange: 150 + (skillLevel * 25),
+                    damage: 8 + (skillLevel * 2),
+                    damageDecay: 0.85,
+                    duration: 120
+                };
+                
+                return this.chainLightningSystem.executeChainLightning(
+                    hitEnemy, hitEnemy.x, hitEnemy.y, chainConfig
+                );
+            },
+            
+            // 랜덤 번개 활성화 (타이머 버그 수정)
+            activateRandomLightning: (skillLevel = 1, duration = 15000) => {
+                if (this.electricSkillSystem.activeRandomLightning) {
+                    this.electricSkillSystem.activeRandomLightning.destroy();
+                    this.electricSkillSystem.activeRandomLightning = null;
+                }
+                
+                const config = {
+                    level: skillLevel,
+                    strikeInterval: Math.max(1000, 3000 - (skillLevel * 500)),
+                    strikesPerWave: skillLevel,
+                    damage: 12 + (skillLevel * 3),
+                    range: 80 + (skillLevel * 20)
+                };
+                
+                console.log(`🌩️ 랜덤 번개 활성화! 레벨: ${skillLevel}, 지속시간: ${duration}ms, 간격: ${config.strikeInterval}ms`);
+                
+                // 단순한 반복 타이머 사용 (내장 반복 종료 기능 활용)
+                this.electricSkillSystem.activeRandomLightning = this.time.addEvent({
+                    delay: config.strikeInterval,
+                    callback: () => {
+                        if (this.player && this.player.active && !this.isSkillSelectionActive) {
+                            this.createRandomLightningStrike(config);
+                        }
+                    },
+                    loop: true // 무한 반복 (영구적)
+                });
+                
+                // 영구적 스킬로 변경 - 종료 타이머 제거
+                console.log('🌩️ 랜덤 번개 영구 활성화! (게임오버까지 지속)');
+                
+                this.showAutoSkillText(`천둥번개 Lv.${skillLevel} 활성화!`);
+                return true;
+            }
+        };
         
         // 월드 경계 설정
         this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
@@ -1602,15 +1700,15 @@ class GameScene extends Phaser.Scene {
         this.enemiesPerWave = Math.min(4, Math.floor(this.difficultyLevel / 3) + 1);
         
         // 적 기본 속도 증가 (더 완만하게 조정)
-        // 처음 10웨이브까지는 천천히, 그 이후 조금 더 빠르게
-        if (this.difficultyLevel <= 10) {
-            this.baseEnemySpeed = 100 + (this.difficultyLevel * 5); // 5씩 증가 (100 -> 150)
+        // 기본 속도 증가율 개선 (더 완만하게)
+        if (this.difficultyLevel <= 15) {
+            this.baseEnemySpeed = 100 + (this.difficultyLevel * 3); // 3씩 증가 (100 -> 145)
         } else {
-            this.baseEnemySpeed = 150 + ((this.difficultyLevel - 10) * 3); // 3씩 증가
+            this.baseEnemySpeed = 145 + ((this.difficultyLevel - 15) * 2); // 2씩 증가
         }
         
-        // 최대 속도 제한 (200까지만)
-        this.baseEnemySpeed = Math.min(this.baseEnemySpeed, 200);
+        // 최대 속도 제한 (180까지만)
+        this.baseEnemySpeed = Math.min(this.baseEnemySpeed, 180);
         
         // 5웨이브마다 오각형 몬스터 스폰
         if (this.difficultyLevel % this.pentagonWaveInterval === 0) {
@@ -2010,13 +2108,16 @@ class GameScene extends Phaser.Scene {
         const clampedX = Phaser.Math.Clamp(x, 50, this.worldWidth - 50);
         const clampedY = Phaser.Math.Clamp(y, 50, this.worldHeight - 50);
         
-        const difficultyMultiplier = 1 + (this.difficultyLevel * 0.15);
+        // 적 속도 증가율 개선 (0.15 -> 0.08로 감소)
+        const difficultyMultiplier = 1 + (this.difficultyLevel * 0.08);
         const enemyTypes = ['enemy1', 'enemy2', 'enemy3'];
         const enemyType = enemyTypes[Phaser.Math.Between(0, 2)];
         
         const enemy = this.physics.add.sprite(clampedX, clampedY, enemyType);
         enemy.enemyType = enemyType;
-        enemy.health = this.getEnemyHealth(enemyType) * Math.ceil(difficultyMultiplier);
+        // 적 체력 점진적 증가 (Math.ceil 대신 부드럽게)
+        const healthMultiplier = 1 + (this.difficultyLevel * 0.12); // 12% 점진적 증가
+        enemy.health = Math.round(this.getEnemyHealth(enemyType) * healthMultiplier);
         enemy.maxHealth = enemy.health;
         enemy.speed = this.getEnemySpeed(enemyType) * (0.9 + Math.random() * 0.2) * difficultyMultiplier;
         enemy.isHit = false;
@@ -2476,6 +2577,12 @@ class GameScene extends Phaser.Scene {
         const angle = Phaser.Math.Angle.Between(bullet.x, bullet.y, enemy.x, enemy.y);
         enemy.knockbackX = Math.cos(angle) * knockbackForce;
         enemy.knockbackY = Math.sin(angle) * knockbackForce;
+        
+        // 전기 체인 스킬 확인 및 발동
+        if (this.skillSystem.selectedSkills.has('electric_chain') && this.electricSkillSystem) {
+            const skillLevel = this.skillSystem.skillStacks.get('electric_chain') || 1;
+            this.electricSkillSystem.triggerElectricChain(enemy, skillLevel);
+        }
         
         bullet.destroy();
         
@@ -3171,6 +3278,13 @@ class GameScene extends Phaser.Scene {
         } else if (buffId === 'auto_shockwave') {
             this.player.setTint(0xffaa00);
             this.startAutoShockwaveTimer(effect.duration);
+        } else if (buffId === 'random_lightning_storm') {
+            this.player.setTint(0xffff00);
+            // 랜덤 번개 스킬 활성화
+            if (this.electricSkillSystem && effect.action === 'activate_random_lightning') {
+                const skillLevel = this.skillSystem.skillStacks.get(skill.id) || 1;
+                this.electricSkillSystem.activateRandomLightning(skillLevel, effect.duration);
+            }
         }
         
         // 만료 타이머 설정
@@ -3196,6 +3310,13 @@ class GameScene extends Phaser.Scene {
             this.autoShockwaveTimer.destroy();
             this.autoShockwaveTimer = null;
             console.log('자동 파동파 타이머 정리됨');
+        }
+        
+        // 번개 스킬 버프 종료 시 타이머 정리
+        if (buffId === 'random_lightning_storm' && this.electricSkillSystem?.activeRandomLightning) {
+            this.electricSkillSystem.activeRandomLightning.destroy();
+            this.electricSkillSystem.activeRandomLightning = null;
+            console.log('랜덤 번개 타이머 정리됨');
         }
         
         this.skillSystem.activeBuffs.delete(buffId);
@@ -3697,8 +3818,8 @@ class GameScene extends Phaser.Scene {
     applyDashElectrify(startX, startY, endX, endY) {
         console.log('⚡ 대쉬 번개 스킬 발동!');
         
-        // 번개 트레일 생성
-        this.createDashTrail(startX, startY, endX, endY, 0x00aaff, '번개');
+        // 향상된 번개 대쉬 트레일 생성
+        this.createLightningDashTrail(startX, startY, endX, endY);
         
         const hitEnemies = new Set();
         const segments = 12;
@@ -3725,6 +3846,18 @@ class GameScene extends Phaser.Scene {
                     
                     // 감전 효과 (번쩍이는 효과)
                     this.applyElectrifyEffect(enemy);
+                    
+                    // 대쉬 번개에서 체인 라이트닝 발동
+                    if (this.chainLightningSystem) {
+                        const chainConfig = {
+                            maxJumps: 3,
+                            maxRange: 150,
+                            damage: damage + 2, // 대쉬 번개 체인은 약간 더 강함
+                            damageDecay: 0.8,
+                            duration: 120
+                        };
+                        this.chainLightningSystem.executeChainLightning(enemy, checkX, checkY, chainConfig);
+                    }
                     
                     if (enemy.health <= 0) {
                         // 적 제거 및 점수/에너지 처리
@@ -4110,6 +4243,141 @@ class GameScene extends Phaser.Scene {
         });
     }
     
+    // 랜덤 번개 내리치기
+    createRandomLightningStrike(config) {
+        const playerX = this.player.x;
+        const playerY = this.player.y;
+        
+        for (let i = 0; i < config.strikesPerWave; i++) {
+            this.time.delayedCall(i * 100, () => {
+                // 최적 위치 선택
+                let strikeX, strikeY;
+                const nearbyEnemies = this.enemies.children.entries.filter(enemy => 
+                    enemy.active && Phaser.Math.Distance.Between(
+                        playerX, playerY, enemy.x, enemy.y
+                    ) <= 300
+                );
+                
+                if (nearbyEnemies.length > 0) {
+                    const target = nearbyEnemies[Math.floor(Math.random() * nearbyEnemies.length)];
+                    strikeX = target.x + (Math.random() - 0.5) * 60;
+                    strikeY = target.y + (Math.random() - 0.5) * 60;
+                } else {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 100 + Math.random() * 200;
+                    strikeX = playerX + Math.cos(angle) * distance;
+                    strikeY = playerY + Math.sin(angle) * distance;
+                }
+                
+                // 바로 번개 실행 (경고 효과 제거)
+                this.time.delayedCall(100, () => {
+                    // 실제 번개
+                    this.createLightningStrikeEffect(strikeX, strikeY);
+                    
+                    // 범위 내 적들에게 데미지
+                    this.enemies.children.entries.forEach(enemy => {
+                        if (enemy.active) {
+                            const distance = Phaser.Math.Distance.Between(strikeX, strikeY, enemy.x, enemy.y);
+                            if (distance <= config.range) {
+                                enemy.health -= config.damage;
+                                this.showDamageNumber(enemy.x, enemy.y - 30, config.damage, 0x00aaff); // 체인라이트닝과 같은 파란색
+                                this.applyElectrifyEffect(enemy);
+                                
+                                if (enemy.health <= 0) {
+                                    this.createExplosion(enemy.x, enemy.y);
+                                    const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                                    this.energy.add(energyOrb);
+                                    const points = this.getEnemyPoints(enemy.enemyType);
+                                    this.score += points;
+                                    enemy.destroy();
+                                }
+                            }
+                        }
+                    });
+                });
+            });
+        }
+    }
+    
+    // 번개 내리치기 시각 효과
+    createLightningStrikeEffect(x, y) {
+        // 메인 번개 기둥 (체인라이트닝과 같은 파란상)
+        const lightning = this.add.graphics();
+        lightning.lineStyle(6, 0x87CEEB, 1.0);
+        
+        const startY = y - 300;
+        const points = [{x: x, y: startY}];
+        
+        // 지그재그 포인트들 생성
+        for (let i = 1; i < 6; i++) {
+            const progress = i / 6;
+            const currentY = startY + (y - startY) * progress;
+            const randomX = x + (Math.random() - 0.5) * 25 * (1 - progress);
+            points.push({x: randomX, y: currentY});
+        }
+        points.push({x: x, y: y});
+        
+        // 번개 그리기
+        lightning.beginPath();
+        lightning.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            lightning.lineTo(points[i].x, points[i].y);
+        }
+        lightning.strokePath();
+        
+        // 글로우 효과 (체인라이트닝과 같은 진한 파란색)
+        const glow = this.add.graphics();
+        glow.lineStyle(15, 0x4169E1, 0.4);
+        glow.beginPath();
+        glow.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            glow.lineTo(points[i].x, points[i].y);
+        }
+        glow.strokePath();
+        
+        // 타격 지점 폭발 (체인라이트닝과 같은 파란색)
+        const explosion = this.add.circle(x, y, 20, 0x00aaff, 0.8);
+        
+        // 애니메이션
+        this.tweens.add({
+            targets: [lightning, glow],
+            alpha: 0,
+            duration: 400,
+            onComplete: () => {
+                lightning.destroy();
+                glow.destroy();
+            }
+        });
+        
+        this.tweens.add({
+            targets: explosion,
+            scaleX: 3,
+            scaleY: 3,
+            alpha: 0,
+            duration: 500,
+            onComplete: () => explosion.destroy()
+        });
+        
+        // 스파크 파티클
+        for (let i = 0; i < 15; i++) {
+            const particle = this.add.circle(x, y, 3, 0xffff00, 0.9);
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 30 + Math.random() * 50;
+            
+            this.tweens.add({
+                targets: particle,
+                x: x + Math.cos(angle) * distance,
+                y: y + Math.sin(angle) * distance,
+                alpha: 0,
+                scaleX: 0.2,
+                scaleY: 0.2,
+                duration: 300 + Math.random() * 300,
+                ease: 'Power2.easeOut',
+                onComplete: () => particle.destroy()
+            });
+        }
+    }
+    
     // 감전 효과 (간단한 버전)
     applyElectrifyEffect(enemy) {
         if (!enemy.active) return;
@@ -4129,6 +4397,127 @@ class GameScene extends Phaser.Scene {
                 }
             },
             repeat: 5
+        });
+    }
+    
+    // 번개 대쉬 트레일 효과
+    createLightningDashTrail(startX, startY, endX, endY) {
+        const totalDistance = Phaser.Math.Distance.Between(startX, startY, endX, endY);
+        const segments = Math.max(8, Math.floor(totalDistance / 25)); // 거리에 따른 세그먼트 수
+        
+        // 메인 번개 경로
+        const mainLightning = this.add.graphics();
+        mainLightning.lineStyle(6, 0x87CEEB, 1.0);
+        
+        // 글로우 효과
+        const glowLightning = this.add.graphics();
+        glowLightning.lineStyle(12, 0x4169E1, 0.4);
+        
+        const points = [{x: startX, y: startY}];
+        
+        // 지그재그 번개 경로 생성
+        for (let i = 1; i < segments; i++) {
+            const progress = i / segments;
+            const baseX = startX + (endX - startX) * progress;
+            const baseY = startY + (endY - startY) * progress;
+            
+            // 수직 방향으로 랜덤 지그재그
+            const perpX = -(endY - startY);
+            const perpY = (endX - startX);
+            const perpLength = Math.sqrt(perpX * perpX + perpY * perpY);
+            
+            if (perpLength > 0) {
+                const normalizedPerpX = perpX / perpLength;
+                const normalizedPerpY = perpY / perpLength;
+                const deviation = (Math.random() - 0.5) * 30; // 지그재그 강도
+                
+                points.push({
+                    x: baseX + normalizedPerpX * deviation,
+                    y: baseY + normalizedPerpY * deviation
+                });
+            } else {
+                points.push({x: baseX, y: baseY});
+            }
+        }
+        
+        points.push({x: endX, y: endY});
+        
+        // 번개 그리기
+        mainLightning.beginPath();
+        glowLightning.beginPath();
+        mainLightning.moveTo(points[0].x, points[0].y);
+        glowLightning.moveTo(points[0].x, points[0].y);
+        
+        for (let i = 1; i < points.length; i++) {
+            mainLightning.lineTo(points[i].x, points[i].y);
+            glowLightning.lineTo(points[i].x, points[i].y);
+        }
+        
+        mainLightning.strokePath();
+        glowLightning.strokePath();
+        
+        // 경로를 따라 간단한 스파크 효과 생성
+        for (let i = 0; i < points.length - 1; i++) {
+            if (i % 2 === 0) { // 간헐적으로만 스파크 생성
+                const spark = this.add.circle(points[i].x, points[i].y, 2, 0xFFFF00, 0.8);
+                
+                this.tweens.add({
+                    targets: spark,
+                    alpha: 0,
+                    scaleX: 0.3,
+                    scaleY: 0.3,
+                    duration: 200,
+                    delay: i * 50,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => spark.destroy()
+                });
+            }
+        }
+        
+        // 시작점과 끝점에 강한 번개 효과
+        this.createLightningBurst(startX, startY, 15);
+        this.createLightningBurst(endX, endY, 20);
+        
+        // 번개 애니메이션 (깜빡이며 사라짐)
+        this.tweens.add({
+            targets: [mainLightning, glowLightning],
+            alpha: 0,
+            duration: 600,
+            ease: 'Power2.easeOut',
+            onComplete: () => {
+                mainLightning.destroy();
+                glowLightning.destroy();
+            }
+        });
+    }
+    
+    // 번개 폭발 효과
+    createLightningBurst(x, y, radius) {
+        const burst = this.add.circle(x, y, radius, 0x87CEEB, 0.8);
+        
+        // 폭발 애니메이션
+        this.tweens.add({
+            targets: burst,
+            scaleX: 2,
+            scaleY: 2,
+            alpha: 0,
+            duration: 400,
+            ease: 'Power2.easeOut',
+            onComplete: () => burst.destroy()
+        });
+        
+        // 간단한 번개 링 효과 (8방향 가지 제거)
+        const ring = this.add.circle(x, y, radius * 1.5, 0x87CEEB, 0);
+        ring.setStrokeStyle(2, 0x87CEEB, 0.6);
+        
+        this.tweens.add({
+            targets: ring,
+            scaleX: 1.5,
+            scaleY: 1.5,
+            alpha: 0,
+            duration: 300,
+            ease: 'Power2.easeOut',
+            onComplete: () => ring.destroy()
         });
     }
     
@@ -4311,8 +4700,373 @@ class GameOverScene extends Phaser.Scene {
     }
 }
 
+// 🌩️ Chain Lightning System - 체인 라이트닝 시스템
+class ChainLightningSystem {
+    constructor(gameScene) {
+        this.game = gameScene;
+        this.activeChains = new Map(); // 진행 중인 체인들
+        this.chainedTargets = new Set(); // 현재 체이닝 중인 적들
+        this.maxConcurrentChains = 3; // 동시 체인 최대 수
+        this.chainIdCounter = 0;
+        
+        this.chainConfig = {
+            maxJumps: 5,           // 최대 점프 수
+            maxRange: 200,         // 최대 점프 거리
+            damage: 15,            // 체인당 데미지
+            damageDecay: 0.8,      // 점프마다 데미지 감소율
+            duration: 150          // 각 점프 간 딜레이(ms)
+        };
+    }
+    
+    // 메인 체인 라이트닝 실행
+    executeChainLightning(initialTarget, sourceX, sourceY, customConfig = {}) {
+        // 설정 병합
+        const config = { ...this.chainConfig, ...customConfig };
+        
+        // 1. 동시 체인 제한 확인
+        if (this.activeChains.size >= this.maxConcurrentChains) {
+            return false; // 체인 제한 초과
+        }
+        
+        // 2. 초기 타겟이 이미 체이닝 중인지 확인
+        if (this.chainedTargets.has(initialTarget.id || initialTarget)) {
+            return false; // 중복 체이닝 방지
+        }
+        
+        // 3. 타겟 유효성 검사
+        if (!initialTarget || !initialTarget.active) {
+            return false;
+        }
+        
+        // 4. 체인 ID 생성 및 시작
+        const chainId = this.generateChainId();
+        const chainData = {
+            id: chainId,
+            targets: [initialTarget],
+            currentJump: 0,
+            currentDamage: config.damage,
+            isActive: true,
+            config: config
+        };
+        
+        this.activeChains.set(chainId, chainData);
+        this.chainedTargets.add(initialTarget.id || initialTarget);
+        
+        // 5. 첫 번째 점프 실행
+        this.executeChainJump(chainData, sourceX, sourceY);
+        
+        console.log(`⚡ 체인 라이트닝 시작: ID=${chainId}, 타겟=${initialTarget.enemyType || 'unknown'}`);
+        return true;
+    }
+    
+    // 개별 체인 점프 실행
+    executeChainJump(chainData, fromX, fromY) {
+        const currentTarget = chainData.targets[chainData.targets.length - 1];
+        
+        if (!currentTarget || !currentTarget.active) {
+            this.endChain(chainData.id);
+            return;
+        }
+        
+        // 1. 현재 타겟에 데미지 적용
+        this.applyChainDamage(currentTarget, chainData.currentDamage);
+        
+        // 2. 시각 효과 생성
+        this.createChainLightningEffect(
+            fromX, fromY, 
+            currentTarget.x, currentTarget.y,
+            chainData.currentJump
+        );
+        
+        // 3. 다음 타겟 찾기
+        const nextTarget = this.findBestNextTarget(
+            currentTarget.x, 
+            currentTarget.y, 
+            chainData.targets,
+            chainData.config.maxRange
+        );
+        
+        // 4. 체인 계속 여부 결정
+        if (nextTarget && chainData.currentJump < chainData.config.maxJumps - 1) {
+            // 다음 점프 준비
+            chainData.targets.push(nextTarget);
+            chainData.currentJump++;
+            chainData.currentDamage *= chainData.config.damageDecay;
+            
+            this.chainedTargets.add(nextTarget.id || nextTarget);
+            
+            // 딜레이 후 다음 점프
+            this.game.time.delayedCall(chainData.config.duration, () => {
+                this.executeChainJump(chainData, currentTarget.x, currentTarget.y);
+            });
+        } else {
+            // 체인 종료
+            this.endChain(chainData.id);
+        }
+    }
+    
+    // 최적 다음 타겟 선택 알고리즘
+    findBestNextTarget(fromX, fromY, excludeTargets, maxRange) {
+        const excludeIds = new Set(excludeTargets.map(t => t.id || t));
+        let bestTarget = null;
+        let bestScore = -1;
+        
+        this.game.enemies.children.entries.forEach(enemy => {
+            if (!enemy.active || excludeIds.has(enemy.id || enemy) || 
+                this.chainedTargets.has(enemy.id || enemy)) {
+                return; // 제외 대상
+            }
+            
+            const distance = Phaser.Math.Distance.Between(
+                fromX, fromY, enemy.x, enemy.y
+            );
+            
+            if (distance <= maxRange) {
+                // 스코어 계산: 거리 + 적 타입 + 체력
+                const score = this.calculateTargetScore(enemy, distance, maxRange);
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestTarget = enemy;
+                }
+            }
+        });
+        
+        return bestTarget;
+    }
+    
+    // 타겟 우선순위 스코어 계산
+    calculateTargetScore(enemy, distance, maxRange) {
+        let score = 0;
+        
+        // 거리 점수 (가까울수록 높음)
+        score += (maxRange - distance) / maxRange * 50;
+        
+        // 적 타입 점수
+        if (enemy.enemyType === 'elite') score += 30;
+        else if (enemy.enemyType === 'star_elite') score += 40;
+        else if (enemy.enemyType === 'pentagon') score += 20;
+        else score += 10;
+        
+        // 체력 점수 (체력이 낮을수록 높음 - 킬 확정)
+        const healthScore = Math.max(0, 10 - (enemy.health || 1));
+        score += healthScore * 2;
+        
+        return score;
+    }
+    
+    // 체인 데미지 적용
+    applyChainDamage(target, damage) {
+        if (!target || !target.active) return;
+        
+        target.health -= damage;
+        
+        // 데미지 표시
+        if (this.game.showDamageNumber) {
+            this.game.showDamageNumber(target.x, target.y - 30, Math.round(damage), 0x00aaff);
+        }
+        
+        // 감전 효과
+        if (this.game.applyElectrifyEffect) {
+            this.game.applyElectrifyEffect(target);
+        }
+        
+        // 적 처치 처리
+        if (target.health <= 0) {
+            this.game.createExplosion(target.x, target.y);
+            
+            // 에너지 오브 생성
+            const energyOrb = this.game.physics.add.sprite(target.x, target.y, 'energy');
+            this.game.energy.add(energyOrb);
+            
+            // 점수 추가
+            const points = this.game.getEnemyPoints ? this.game.getEnemyPoints(target.enemyType) : 100;
+            this.game.score += points;
+            
+            // 적 제거
+            target.destroy();
+        }
+    }
+    
+    // 체인 종료 처리
+    endChain(chainId) {
+        const chainData = this.activeChains.get(chainId);
+        if (!chainData) return;
+        
+        console.log(`⚡ 체인 라이트닝 종료: ID=${chainId}, 총 ${chainData.targets.length}개 타겟`);
+        
+        // 체이닝된 타겟들을 해제
+        chainData.targets.forEach(target => {
+            this.chainedTargets.delete(target.id || target);
+        });
+        
+        // 체인 데이터 제거
+        this.activeChains.delete(chainId);
+        
+        // 최종 폭발 효과 (옵션)
+        const lastTarget = chainData.targets[chainData.targets.length - 1];
+        if (lastTarget && lastTarget.active) {
+            this.createChainFinaleEffect(lastTarget.x, lastTarget.y);
+        }
+    }
+    
+    // 체인 ID 생성
+    generateChainId() {
+        return `chain_${++this.chainIdCounter}_${Date.now()}`;
+    }
+    
+    // 향상된 체인 라이트닝 이펙트
+    createChainLightningEffect(fromX, fromY, toX, toY, jumpIndex = 0) {
+        // 메인 지그재그 번개
+        const mainLightning = this.createZigzagLightning(fromX, fromY, toX, toY);
+        
+        // 글로우 효과
+        const glowEffect = this.createLightningGlow(fromX, fromY, toX, toY);
+        
+        // 스파크 파티클
+        this.createSparkParticles(toX, toY, jumpIndex);
+        
+        return { mainLightning, glowEffect };
+    }
+    
+    // 지그재그 번개 생성
+    createZigzagLightning(fromX, fromY, toX, toY) {
+        const lightning = this.game.add.graphics();
+        
+        // 메인 번개 (두껍고 밝은 청백색)
+        lightning.lineStyle(4, 0x87CEEB, 1.0);
+        
+        const segments = 6; // 지그재그 세그먼트 수
+        const deviation = 20; // 최대 편차
+        
+        let points = [{x: fromX, y: fromY}];
+        
+        // 중간점들 생성 (랜덤 지그재그)
+        for (let i = 1; i < segments; i++) {
+            const progress = i / segments;
+            const baseX = fromX + (toX - fromX) * progress;
+            const baseY = fromY + (toY - fromY) * progress;
+            
+            // 수직 방향으로 랜덤 편차 추가
+            const perpX = -(toY - fromY);
+            const perpY = (toX - fromX);
+            const perpLength = Math.sqrt(perpX * perpX + perpY * perpY);
+            
+            if (perpLength > 0) {
+                const normalizedPerpX = perpX / perpLength;
+                const normalizedPerpY = perpY / perpLength;
+                const randomDeviation = (Math.random() - 0.5) * deviation;
+                
+                points.push({
+                    x: baseX + normalizedPerpX * randomDeviation,
+                    y: baseY + normalizedPerpY * randomDeviation
+                });
+            } else {
+                points.push({x: baseX, y: baseY});
+            }
+        }
+        
+        points.push({x: toX, y: toY});
+        
+        // 번개 그리기
+        lightning.beginPath();
+        lightning.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            lightning.lineTo(points[i].x, points[i].y);
+        }
+        lightning.strokePath();
+        
+        // 번개 애니메이션 (깜빡이고 사라짐)
+        this.game.tweens.add({
+            targets: lightning,
+            alpha: 0,
+            duration: 300,
+            ease: 'Power2.easeOut',
+            onComplete: () => lightning.destroy()
+        });
+        
+        return lightning;
+    }
+    
+    // 번개 글로우 효과
+    createLightningGlow(fromX, fromY, toX, toY) {
+        const glow = this.game.add.graphics();
+        
+        // 소프트 글로우 (더 굵고 투명한 청색)
+        glow.lineStyle(12, 0x4169E1, 0.3);
+        glow.beginPath();
+        glow.moveTo(fromX, fromY);
+        glow.lineTo(toX, toY);
+        glow.strokePath();
+        
+        this.game.tweens.add({
+            targets: glow,
+            alpha: 0,
+            duration: 400,
+            onComplete: () => glow.destroy()
+        });
+        
+        return glow;
+    }
+    
+    // 스파크 파티클 효과
+    createSparkParticles(x, y, intensity = 0) {
+        const particleCount = 8 + (intensity * 2);
+        
+        for (let i = 0; i < particleCount; i++) {
+            const particle = this.game.add.circle(x, y, 2, 0xFFFF00, 0.8);
+            
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 20 + Math.random() * 30;
+            
+            this.game.tweens.add({
+                targets: particle,
+                x: x + Math.cos(angle) * distance,
+                y: y + Math.sin(angle) * distance,
+                alpha: 0,
+                scaleX: 0.2,
+                scaleY: 0.2,
+                duration: 200 + Math.random() * 200,
+                ease: 'Power2.easeOut',
+                onComplete: () => particle.destroy()
+            });
+        }
+    }
+    
+    // 체인 최종 효과
+    createChainFinaleEffect(x, y) {
+        // 작은 번개 폭발
+        const finale = this.game.add.circle(x, y, 15, 0x00aaff, 0.8);
+        
+        this.game.tweens.add({
+            targets: finale,
+            scaleX: 2,
+            scaleY: 2,
+            alpha: 0,
+            duration: 400,
+            ease: 'Power2.easeOut',
+            onComplete: () => finale.destroy()
+        });
+        
+        // 추가 스파크
+        this.createSparkParticles(x, y, 3);
+    }
+    
+    // 정리 작업 (메모리 누수 방지)
+    cleanup() {
+        const now = Date.now();
+        const maxAge = 10000; // 10초
+        
+        for (let [chainId, chainData] of this.activeChains) {
+            if (now - parseInt(chainId.split('_')[2]) > maxAge) {
+                this.endChain(chainId);
+            }
+        }
+    }
+}
+
 // Export main classes for modular use
-export { StatModifierEngine, TitleScene, GameScene, GameOverScene, skillDefinitions };
+export { StatModifierEngine, TitleScene, GameScene, GameOverScene, skillDefinitions, ChainLightningSystem };
 
 // 게임 인스턴스 생성은 main.js에서 담당
 // 이곳에서는 클래스 정의만 export
