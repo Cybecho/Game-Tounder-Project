@@ -1,2 +1,23 @@
+# Logs
+*.log
 server.log
 debug_output.log
+
+# Node modules
+node_modules/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Build output
+dist/
+build/
