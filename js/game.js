@@ -383,7 +383,7 @@ const skillDefinitions = {
     double_shockwave: {
         id: 'double_shockwave',
         name: '이중 충격',
-        description: '파동파가 2연속으로 발동됩니다 (첫번째 → 2초 후 두배 크기)',
+        description: '파동파가 2연속으로 발동됩니다 (첫번째 → 1초 후 1.3배 크기)',
         category: 'skill',
         rarity: 'legendary',
         stackable: false,
@@ -3276,29 +3276,119 @@ class GameScene extends Phaser.Scene {
         });
     }
     
-    // 에너지 구슬 전체 수집 기능
+    // 에너지 구슬 전체 수집 기능 (자석 효과)
     collectAllEnergyOrbs() {
         let collectedCount = 0;
+        const playerX = this.player.x;
+        const playerY = this.player.y;
         
-        // 모든 에너지 구슬을 순회하며 수집
-        this.energy.children.entries.forEach(orb => {
+        // 자석 시각 효과 생성
+        this.createMagneticFieldEffect(playerX, playerY);
+        
+        // 모든 에너지 구슬에 자석 효과 적용
+        this.energy.children.entries.forEach((orb, index) => {
             if (orb.active) {
-                this.collectEnergy(this.player, orb);
                 collectedCount++;
+                
+                // 각 구슬에 지연 시간을 두어 순차적으로 끌어당김
+                const delay = index * 50; // 50ms 간격
+                
+                this.time.delayedCall(delay, () => {
+                    if (orb.active) {
+                        this.attractOrbToPlayer(orb, playerX, playerY);
+                    }
+                });
             }
         });
         
         // 시각적 피드백
         if (collectedCount > 0) {
             this.showSkillAcquiredText({
-                name: `에너지 ${collectedCount}개 수집!`
+                name: `자석 효과: ${collectedCount}개 구슬 흡수!`
             });
             
             // 카메라 흔들림 효과
-            this.shakeCamera(200, 0.015);
+            this.shakeCamera(300, 0.02);
+            
+            // 자석 소리 효과 (시뮬레이션)
+            console.log('🧲 자석 효과음 재생');
         }
         
-        console.log(`에너지 구슬 ${collectedCount}개 수집 완료`);
+        console.log(`🧲 자석으로 에너지 구슬 ${collectedCount}개 흡수 시작`);
+    }
+    
+    // 자기장 시각 효과
+    createMagneticFieldEffect(x, y) {
+        // 동심원 자기장 라인들
+        for (let i = 1; i <= 4; i++) {
+            const radius = 100 * i;
+            const magneticField = this.add.graphics();
+            magneticField.lineStyle(2, 0x00ff88, 0.6 - (i * 0.1));
+            magneticField.strokeCircle(x, y, 30);
+            
+            // 확산 애니메이션
+            this.tweens.add({
+                targets: magneticField,
+                scaleX: radius / 30,
+                scaleY: radius / 30,
+                alpha: 0,
+                duration: 800 + (i * 200),
+                ease: 'Power2',
+                onComplete: () => magneticField.destroy()
+            });
+        }
+    }
+    
+    // 구슬을 플레이어에게 끌어당기기
+    attractOrbToPlayer(orb, playerX, playerY) {
+        // 구슬에 반짝임 효과
+        orb.setTint(0x88ff88);
+        
+        // 곡선 경로로 플레이어에게 끌려감
+        const startX = orb.x;
+        const startY = orb.y;
+        
+        // 중간점 계산 (약간 곡선 효과)
+        const midX = (startX + playerX) / 2 + Phaser.Math.Between(-50, 50);
+        const midY = (startY + playerY) / 2 + Phaser.Math.Between(-50, 50);
+        
+        // 곡선 이동 애니메이션
+        const path = { t: 0 };
+        this.tweens.add({
+            targets: path,
+            t: 1,
+            duration: 600,
+            ease: 'Power2',
+            onUpdate: () => {
+                if (orb.active) {
+                    const t = path.t;
+                    // 베지어 곡선 계산
+                    const x = Math.pow(1-t, 2) * startX + 2*(1-t)*t * midX + Math.pow(t, 2) * playerX;
+                    const y = Math.pow(1-t, 2) * startY + 2*(1-t)*t * midY + Math.pow(t, 2) * playerY;
+                    orb.setPosition(x, y);
+                }
+            },
+            onComplete: () => {
+                if (orb.active) {
+                    // 수집 완료
+                    this.collectEnergy(this.player, orb);
+                    
+                    // 작은 반짝임 효과
+                    const sparkle = this.add.graphics();
+                    sparkle.fillStyle(0x88ff88, 1);
+                    sparkle.fillCircle(playerX, playerY, 15);
+                    
+                    this.tweens.add({
+                        targets: sparkle,
+                        scaleX: 2,
+                        scaleY: 2,
+                        alpha: 0,
+                        duration: 200,
+                        onComplete: () => sparkle.destroy()
+                    });
+                }
+            }
+        });
     }
     
     // 자동 파동파 타이머 시작
@@ -3453,16 +3543,13 @@ class GameScene extends Phaser.Scene {
                 if (distance <= 80) { // 더 넓은 판정 범위
                     hitEnemies.add(enemy);
                     
-                    // 강한 넉백 적용
+                    // 파동파와 동일한 넉백 적용
                     const knockbackAngle = Phaser.Math.Angle.Between(checkX, checkY, enemy.x, enemy.y);
-                    const knockbackForce = 1200; // 더 강한 넉백
+                    const knockbackForce = 1400; // 파동파와 동일한 넉백력
                     
-                    if (enemy.body && enemy.body.velocity) {
-                        enemy.setVelocity(
-                            enemy.body.velocity.x + Math.cos(knockbackAngle) * knockbackForce,
-                            enemy.body.velocity.y + Math.sin(knockbackAngle) * knockbackForce
-                        );
-                    }
+                    // 파동파와 동일한 넉백 적용 방식
+                    enemy.knockbackX = Math.cos(knockbackAngle) * knockbackForce;
+                    enemy.knockbackY = Math.sin(knockbackAngle) * knockbackForce;
                     
                     // 강화된 시각 효과
                     this.createEnhancedKnockbackEffect(enemy.x, enemy.y, knockbackAngle);
@@ -3537,6 +3624,9 @@ class GameScene extends Phaser.Scene {
         
         // 메인 폭발 효과 먼저 생성
         this.createMegaExplosion(endX, endY, explosionRadius);
+        
+        // 50% 크기 파동파 이펙트 추가
+        this.createExplosionLightningWave(endX, endY);
         
         // 화면 흔들림
         this.cameras.main.shake(500, 0.08);
@@ -3669,10 +3759,10 @@ class GameScene extends Phaser.Scene {
         // 중복 실행 방지 플래그 설정
         this.doubleShockwaveActive = true;
         
-        console.log('이중 파동파 스킬 시작 (2초 후 두 번째 발동 예약)');
+        console.log('이중 파동파 스킬 시작 (1초 후 두 번째 발동 예약)');
         
-        // 2초 후 두 번째 파동파 (두배 크기)
-        this.time.delayedCall(2000, () => {
+        // 1초 후 두 번째 파동파 (1.3배 크기)
+        this.time.delayedCall(1000, () => {
             // 버그 수정: 다시 한번 게임 상태 체크
             if (!this.player || !this.player.active || this.isSkillSelectionActive || this.scene.isPaused()) {
                 this.doubleShockwaveActive = false; // 플래그 리셋
@@ -3681,7 +3771,7 @@ class GameScene extends Phaser.Scene {
             
             const secondPlayerX = this.player.x;
             const secondPlayerY = this.player.y;
-            const enhancedRadius = this.lightningWaveRadius * 2; // 두배 크기
+            const enhancedRadius = this.lightningWaveRadius * 1.3; // 1.3배 크기 (적정)
             
             console.log('이중 파동파 두 번째 발동');
             
@@ -3978,6 +4068,29 @@ class GameScene extends Phaser.Scene {
             duration: 600,
             onComplete: () => explosion.destroy()
         });
+    }
+    
+    // 폭발 착지용 간단한 파동 이펙트
+    createExplosionLightningWave(x, y) {
+        const waveRadius = 200; // 고정 크기로 단순화
+        
+        // 간단한 동그란 파동 이펙트
+        const wave = this.add.graphics();
+        wave.lineStyle(4, 0x00aaff, 0.8);
+        wave.strokeCircle(x, y, 15);
+        
+        // 확산 애니메이션
+        this.tweens.add({
+            targets: wave,
+            scaleX: waveRadius / 15,
+            scaleY: waveRadius / 15,
+            alpha: 0,
+            duration: 500,
+            ease: 'Power2',
+            onComplete: () => wave.destroy()
+        });
+        
+        console.log(`✅ 간단한 폭발 파동 이펙트 생성: ${waveRadius}px 반경`);
     }
     
     // 강화된 번개 효과 (간단한 버전)
