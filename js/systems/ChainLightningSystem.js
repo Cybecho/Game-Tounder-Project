@@ -10,7 +10,7 @@ export class ChainLightningSystem {
         this.chainConfig = {
             maxJumps: 5,           // 최대 점프 수
             maxRange: 200,         // 최대 점프 거리
-            damage: 15,            // 체인당 데미지
+            damage: 5,            // 체인당 데미지
             damageDecay: 0.8,      // 점프마다 데미지 감소율
             duration: 150          // 각 점프 간 딜레이(ms)
         };

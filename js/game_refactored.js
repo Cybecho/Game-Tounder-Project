@@ -394,6 +394,25 @@ const skillDefinitions = {
         }
     },
     
+    // === 미사일 스킬들 (새로 추가) ===
+    
+    guided_missile: {
+        id: 'guided_missile',
+        name: '유도 미사일',
+        description: '3초에 한번씩 적을향해 유도하는 미사일을 발사합니다 (최대 10회)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 10,
+        probability: 0.04,
+        effect: {
+            type: 'special_behavior',
+            action: 'activate_guided_missile',
+            value: 1
+        }
+    },
+    
+    
     // === 전기 스킬들 (새로 추가) ===
     
     electric_chain: {
@@ -868,39 +887,59 @@ class GameScene extends Phaser.Scene {
             }
         };
         
-        // 월드 경계 설정
-        this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
-        
         // 격자 배경 생성
         this.createGridBackground();
         
+        // 플레이어 생성
         this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'player');
         this.player.setCollideWorldBounds(true);
         this.player.setDrag(this.playerDrag);
         this.player.setMaxVelocity(this.playerSpeed);
         
+        // 게임 오브젝트 그룹 생성
         this.enemies = this.physics.add.group();
         this.bullets = this.physics.add.group();
-        this.enemyBullets = this.physics.add.group(); // 적 총알 그룹 추가
+        this.enemyBullets = this.physics.add.group();
         this.energy = this.physics.add.group();
         this.bulletUpgrades = this.physics.add.group();
         this.explosions = this.add.group();
         this.dashEffects = this.add.group();
         
+        // 키보드 입력 설정
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys('W,S,A,D');
         this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
         this.lKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
+        this.mKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M); // 미사일 테스트용
         
-        // 마우스 클릭 이벤트 추가
+        // 마우스 클릭 이벤트
         this.input.on('pointerdown', this.onPointerDown, this);
         
         // 카메라 설정
         this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight);
         this.cameras.main.startFollow(this.player, true, 0.05, 0.05);
         
+        // UI 생성
         this.createUI();
         
+        // 게임 타이머들 설정
+        this.setupGameTimers();
+        
+        // 충돌 감지 설정
+        this.setupCollisionDetection();
+        
+        // 미사일 시스템 초기화 (모든 게임 오브젝트 생성 후)
+        this.initializeMissileSystem();
+        
+        // 미사일 풀이 생성된 후 미사일 충돌 감지 설정
+        this.setupMissileCollisions();
+        
+        // 월드 경계 설정
+        this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
+    }
+    
+    // 게임 타이머들 설정
+    setupGameTimers() {
         // 적 스폰 타이머
         this.enemySpawnTimer = this.time.addEvent({
             delay: this.enemySpawnRate,
@@ -940,12 +979,1039 @@ class GameScene extends Phaser.Scene {
             callbackScope: this,
             loop: true
         });
-        
+    }
+    
+    // 충돌 감지 설정
+    setupCollisionDetection() {
         this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
         this.physics.add.overlap(this.player, this.energy, this.collectEnergy, null, this);
         this.physics.add.overlap(this.player, this.bulletUpgrades, this.collectBulletUpgrade, null, this);
         this.physics.add.overlap(this.player, this.enemies, this.playerHit, null, this);
         this.physics.add.overlap(this.player, this.enemyBullets, this.playerHitByBullet, null, this);
+    }
+    
+    // 미사일 풀 생성 후 미사일 충돌 감지 설정
+    setupMissileCollisions() {
+        if (this.missilePool) {
+            console.log('🚀 미사일 충돌 감지 설정 중...');
+            this.physics.add.overlap(this.missilePool, this.enemies, this.missileHitEnemy, null, this);
+            console.log('✅ 미사일-적 충돌 감지 설정 완료!');
+        } else {
+            console.warn('❌ 미사일 풀이 없어서 충돌 감지를 설정할 수 없습니다!');
+        }
+    }
+
+    // M키 미사일 발사 테스트 메서드
+    testMissileFire() {
+        console.log('🚀 M키 미사일 테스트 발사!');
+        
+        if (!this.missilePool) {
+            console.warn('❌ 미사일 풀이 없습니다!');
+            return;
+        }
+        
+        // 가장 가까운 적 찾기
+        let nearestEnemy = null;
+        let nearestDistance = Infinity;
+        
+        this.enemies.children.entries.forEach(enemy => {
+            if (enemy.active) {
+                const distance = Phaser.Math.Distance.Between(
+                    this.player.x, this.player.y, enemy.x, enemy.y
+                );
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestEnemy = enemy;
+                }
+            }
+        });
+        
+        if (nearestEnemy) {
+            console.log(`🎯 타겟 발견: ${nearestEnemy.enemyType || 'unknown'}, 거리: ${Math.round(nearestDistance)}`);
+            
+            // 미사일 발사
+            const missile = this.missilePool.get(this.player.x, this.player.y);
+            if (missile) {
+                const success = missile.launch(nearestEnemy, 3); // 3번 바운스
+                if (success) {
+                    console.log('✅ 미사일 발사 성공!');
+                } else {
+                    console.warn('❌ 미사일 발사 실패!');
+                }
+            } else {
+                console.warn('❌ 미사일 풀에서 객체를 가져올 수 없습니다!');
+            }
+        } else {
+            console.warn('❌ 주변에 적이 없습니다!');
+            
+            // 테스트용 더미 타겟 생성
+            console.log('🎯 테스트용 더미 적 생성');
+            const dummyEnemy = this.physics.add.sprite(
+                this.player.x + 200, this.player.y, 'enemy'
+            );
+            dummyEnemy.enemyType = 'test_dummy';
+            dummyEnemy.health = 10;
+            dummyEnemy.setTint(0xFF0000); // 빨간색으로 표시
+            this.enemies.add(dummyEnemy);
+            
+            // 더미 적에게 미사일 발사
+            const missile = this.missilePool.get(this.player.x, this.player.y);
+            if (missile) {
+                missile.launch(dummyEnemy, 3);
+                console.log('✅ 테스트 더미에게 미사일 발사!');
+            }
+        }
+    }
+
+    // 미사일 시스템 초기화
+    initializeMissileSystem() {
+        // 미사일 클래스 로드 (인라인 구현)
+        this.loadMissileClasses();
+        
+        // 미사일 풀 생성
+        this.missilePool = this.physics.add.group({
+            classType: this.GuidedMissile,
+            runChildUpdate: true,
+            maxSize: 100,
+            createCallback: (missile) => {
+                missile.setName('guidedMissile');
+            }
+        });
+        
+        // 미사일 스킬 매니저
+        this.missileSkillManager = new this.MissileSkillManager(this);
+        
+        // 충돌 감지 설정
+        this.physics.add.overlap(this.missilePool, this.enemies, (missile, enemy) => {
+            console.log('🎯 미사일-적 물리 충돌 감지!', {
+                missileActive: missile.active,
+                enemyActive: enemy.active,
+                missilePos: {x: Math.round(missile.x), y: Math.round(missile.y)},
+                enemyPos: {x: Math.round(enemy.x), y: Math.round(enemy.y)}
+            });
+            
+            if (missile.active && enemy.active) {
+                missile.onHit(enemy);
+            } else {
+                console.log('⚠️ 충돌했지만 조건 불만족 - 스킵');
+            }
+        });
+        
+        console.log('🚀 미사일 시스템 초기화 완료');
+    }
+    
+    // 미사일 클래스들 로드 (인라인 구현)
+    loadMissileClasses() {
+        // GuidedMissile 클래스 인라인 구현
+        this.GuidedMissile = class GuidedMissile extends Phaser.Physics.Arcade.Sprite {
+            constructor(scene, x, y) {
+                super(scene, x, y, 'energy');
+                
+                scene.add.existing(this);
+                scene.physics.add.existing(this);
+                this.body.setAllowGravity(false);
+                this.setActive(false).setVisible(false);
+                
+                // Navigation System
+                this.speedMin = 180;
+                this.speedMax = 420;
+                this.currentSpeed = 260;
+                this.turnRate = 8;
+                this.accelerationEasing = 0.15;
+                
+                // Wobble Effect
+                this.wobbleAmp = 45;
+                this.wobbleFreq = 8;
+                this.wobbleTime = 0;
+                
+                // Bounce System
+                this.bounceLeft = 3;
+                this.bounceRadius = 220;
+                this.hitCooldown = 0;
+                this.visitedTargets = new Set();
+                
+                // Lifecycle
+                this.maxLifetime = 6;
+                this.currentLifetime = 0;
+                this.damage = 3;
+                
+                // State
+                this.state = 'INACTIVE';
+                this.target = null;
+                
+                // Enhanced Impact System (강화된 타격감)
+                this.bounceBackForce = 2.5;    // 반대방향 튕김 강도 2.5배
+                this.bounceBackDistance = 120;  // 튕김 거리 2배 증가
+                this.targetOnly = true;        // 타겟만 타격 가능
+                
+                // Wandering System (배회 시스템)
+                this.wanderingTime = 0;        // 배회 시간 누적
+                this.wanderingTimeout = 4000;  // 4초 타임아웃
+                this.lemniscatePhase = 0;      // ∞ 궤적 위상
+                this.lemniscateScale = 250;     // ∞ 궤적 크기 (더 크고 역동적)
+                this.wanderingBaseX = 0;       // 배회 중심점
+                this.wanderingBaseY = 0;
+                
+                // Target Reacquisition (타겟 재포착)
+                this.targetingDelay = 0;       // 2초 딜레이 카운터
+                this.targetingDelayDuration = 500; // 0.5초 딜레이
+                this.hasFoundNewTarget = false; // 새 타겟 발견 플래그
+                
+                // Visual
+                this.trailPoints = [];
+                this.maxTrailPoints = 12;
+                
+                this.setupVisualEffects();
+            }
+            
+            setupVisualEffects() {
+                this.setTint(0x00AAFF);
+                this.setScale(0.8);
+                
+                this.glowEffect = this.scene.add.circle(this.x, this.y, 8, 0x87CEEB, 0.3);
+                this.glowEffect.setVisible(false);
+            }
+            
+            launch(target, bounceCount) {
+                if (!target || !target.active) return false;
+                
+                this.setActive(true).setVisible(true);
+                this.glowEffect.setVisible(true);
+                
+                this.target = target;
+                this.bounceLeft = bounceCount;
+                this.currentLifetime = 0;
+                this.wobbleTime = 0;
+                this.hitCooldown = 0;
+                this.visitedTargets.clear();
+                this.trailPoints = [];
+                this.state = 'LAUNCHING';
+                
+                // 배회 시스템 초기화
+                this.wanderingTime = 0;
+                this.targetingDelay = 0;
+                this.hasFoundNewTarget = false;
+                this.newTarget = null;
+                
+                const initialAngle = Phaser.Math.Angle.Between(this.x, this.y, target.x, target.y);
+                this.scene.physics.velocityFromRotation(initialAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = initialAngle;
+                
+                this.scene.time.delayedCall(200, () => {
+                    if (this.active) {
+                        this.state = 'SEEKING';
+                    }
+                });
+                
+                return true;
+            }
+            
+            preUpdate(time, delta) {
+                super.preUpdate(time, delta);
+                
+                if (!this.active) return;
+                
+                const dt = delta / 1000;
+                this.currentLifetime += dt;
+                this.wobbleTime += dt;
+                this.hitCooldown = Math.max(0, this.hitCooldown - delta);
+                
+                // 수명 체크
+                if (this.currentLifetime > this.maxLifetime) {
+                    return this.destroyMissile();
+                }
+                
+                // 타겟 유효성 체크 (배회 모드가 아닌 경우에만)
+                if (this.state !== 'WANDERING' && (!this.target || !this.target.active)) {
+                    console.log('🎯 타겟 소실 → 배회 모드 전환');
+                    this.enterWanderingMode();
+                    return;
+                }
+                
+                switch (this.state) {
+                    case 'LAUNCHING':
+                        this.updateLaunching(dt);
+                        break;
+                    case 'SEEKING':
+                        this.updateSeeking(dt);
+                        break;
+                    case 'WANDERING':
+                        this.updateWanderingMovement(delta);
+                        break;
+                    case 'BOUNCING':
+                        if (this.hitCooldown <= 0) {
+                            this.state = 'SEEKING';
+                        }
+                        break;
+                }
+                
+                this.updateVisualEffects();
+            }
+            
+            updateLaunching(dt) {
+                const targetAngle = Phaser.Math.Angle.Between(this.x, this.y, this.target.x, this.target.y);
+                this.scene.physics.velocityFromRotation(targetAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = targetAngle;
+            }
+            
+            updateSeeking(dt) {
+                const aimPoint = this.calculateWobbledAimPoint();
+                
+                const desiredAngle = Phaser.Math.Angle.Between(this.x, this.y, aimPoint.x, aimPoint.y);
+                const currentAngle = this.body.velocity.angle();
+                const nextAngle = Phaser.Math.Angle.RotateTo(currentAngle, desiredAngle, this.turnRate * dt);
+                
+                const alignment = Math.cos(Phaser.Math.Angle.Wrap(desiredAngle - nextAngle));
+                const targetSpeed = Phaser.Math.Linear(this.speedMin, this.speedMax, (alignment + 1) * 0.5);
+                this.currentSpeed = Phaser.Math.Linear(this.currentSpeed, targetSpeed, this.accelerationEasing);
+                
+                this.scene.physics.velocityFromRotation(nextAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = nextAngle;
+            }
+            
+            calculateWobbledAimPoint() {
+                const toTarget = new Phaser.Math.Vector2(this.target.x - this.x, this.target.y - this.y);
+                const perpendicular = new Phaser.Math.Vector2(-toTarget.y, toTarget.x);
+                if (perpendicular.length() > 0) {
+                    perpendicular.normalize();
+                }
+                
+                const wobbleOffset = Math.sin(this.wobbleTime * this.wobbleFreq) * this.wobbleAmp;
+                
+                return new Phaser.Math.Vector2(this.target.x, this.target.y)
+                    .add(perpendicular.scale(wobbleOffset));
+            }
+            
+            
+            onHit(enemy) {
+                if (!this.active || this.hitCooldown > 0 || this.state !== 'SEEKING') return;
+                
+                // 디버깅: 충돌 감지 로깅
+                console.log('💥 미사일 충돌 감지!', {
+                    missileActive: this.active,
+                    enemyActive: enemy.active,
+                    missileState: this.state,
+                    hitCooldown: this.hitCooldown,
+                    targetOnly: this.targetOnly,
+                    isTarget: enemy === this.target,
+                    enemyType: enemy.enemyType || 'unknown'
+                });
+                
+                // 타겟 전용 체크 비활성화 (미사일이 모든 적을 공격할 수 있도록)
+                // if (this.targetOnly && enemy !== this.target) {
+                //     console.log('⚠️ 비타겟 적 타격 - 데미지 없음');
+                //     this.createHitEffect(enemy.x, enemy.y);
+                //     return;
+                // }
+                
+                console.log(`💥 미사일 적 타격! ${enemy.enemyType || 'unknown'}, 남은 바운스: ${this.bounceLeft}`);
+                
+                // 일반공격과 동일한 타격 이팩트 발생 보장
+                this.createHitEffect(enemy.x, enemy.y);
+                
+                this.applyDamage(enemy);
+                
+                // 타임아웃 초기화 (타격시 시간 다시 연장)
+                this.wanderingTime = 0;
+                
+                this.handleBounce(enemy);
+            }
+            
+            applyDamage(enemy) {
+                const previousHealth = enemy.health;
+                enemy.health -= this.damage;
+                
+                // 디버깅: 데미지 적용 로깅
+                console.log('🔥 미사일 데미지 적용:', {
+                    previousHealth: previousHealth,
+                    damage: this.damage,
+                    newHealth: enemy.health,
+                    enemyType: enemy.enemyType || 'unknown'
+                });
+                
+                // 미사일 데미지 표시 (더 큰 사이즈, 미사일 색상)
+                if (this.scene.showDamageNumber) {
+                    this.scene.showDamageNumber(enemy.x, enemy.y - 35, this.damage, 0x00AAFF);
+                }
+                
+                // 추가 데미지 표시 (더 눈에 띄게)
+                const damageText = this.scene.add.text(enemy.x, enemy.y - 50, `-${this.damage}`, {
+                    fontSize: '18px',
+                    color: '#00AAFF',
+                    stroke: '#003366',
+                    strokeThickness: 3,
+                    shadow: { offsetX: 2, offsetY: 2, color: '#000000', fill: true }
+                }).setOrigin(0.5);
+                
+                this.scene.tweens.add({
+                    targets: damageText,
+                    y: enemy.y - 80,
+                    alpha: 0,
+                    scaleX: 1.2,
+                    scaleY: 1.2,
+                    duration: 1000,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => damageText.destroy()
+                });
+                
+                if (this.scene.applyElectrifyEffect) {
+                    this.scene.applyElectrifyEffect(enemy);
+                }
+                
+                if (enemy.health <= 0) {
+                    this.scene.createExplosion(enemy.x, enemy.y);
+                    
+                    const energyOrb = this.scene.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                    this.scene.energy.add(energyOrb);
+                    
+                    const points = this.scene.getEnemyPoints ? this.scene.getEnemyPoints(enemy.enemyType) : 100;
+                    this.scene.score += points;
+                    
+                    enemy.destroy();
+                }
+            }
+            
+            handleBounce(hitEnemy) {
+                this.bounceLeft--;
+                this.visitedTargets.add(hitEnemy);
+                this.hitCooldown = 84; // 30% 빈도 증가 (120ms -> 84ms)
+                this.state = 'BOUNCING';
+                
+                // 강화된 타격감: 반대방향 튕김 효과
+                this.performEnhancedBounceBack(hitEnemy);
+                
+                if (this.bounceLeft < 0) {
+                    console.log('💥 미사일 바운스 횟수 소진 → 배회 모드 전환');
+                    this.enterWanderingMode();
+                    return;
+                }
+                
+                const nextTarget = this.findBounceTarget(hitEnemy);
+                
+                if (nextTarget) {
+                    console.log(`🎯 다음 바운스 타겟 발견: ${nextTarget.enemyType || 'unknown'}`);
+                    this.target = nextTarget;
+                    this.createBounceEffect(hitEnemy.x, hitEnemy.y, nextTarget.x, nextTarget.y);
+                    this.state = 'SEEKING';
+                } else {
+                    console.log('🔍 바운스 타겟 없음 → 배회 모드 전환');
+                    this.enterWanderingMode();
+                }
+            }
+            
+            findBounceTarget(excludeEnemy) {
+                const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
+                    if (!enemy.active || enemy === excludeEnemy) return false;
+                    
+                    const distance = Phaser.Math.Distance.Between(
+                        excludeEnemy.x, excludeEnemy.y, enemy.x, enemy.y
+                    );
+                    
+                    return distance <= this.bounceRadius;
+                });
+                
+                if (nearbyEnemies.length === 0) return null;
+                
+                const unvisited = nearbyEnemies.filter(e => !this.visitedTargets.has(e));
+                const candidates = unvisited.length > 0 ? unvisited : nearbyEnemies;
+                
+                let closestEnemy = candidates[0];
+                let closestDistance = Phaser.Math.Distance.Between(
+                    excludeEnemy.x, excludeEnemy.y, closestEnemy.x, closestEnemy.y
+                );
+                
+                for (let i = 1; i < candidates.length; i++) {
+                    const distance = Phaser.Math.Distance.Between(
+                        excludeEnemy.x, excludeEnemy.y, candidates[i].x, candidates[i].y
+                    );
+                    
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        closestEnemy = candidates[i];
+                    }
+                }
+                
+                return closestEnemy;
+            }
+            
+            updateVisualEffects() {
+                this.glowEffect.setPosition(this.x, this.y);
+                
+                this.trailPoints.push({
+                    x: this.x,
+                    y: this.y,
+                    timestamp: Date.now()
+                });
+                
+                const cutoffTime = Date.now() - 300;
+                this.trailPoints = this.trailPoints.filter(p => p.timestamp > cutoffTime);
+                
+                if (this.trailPoints.length > this.maxTrailPoints) {
+                    this.trailPoints.shift();
+                }
+                
+                this.renderTrail();
+            }
+            
+            renderTrail() {
+                if (this.trailPoints.length < 2) return;
+                
+                if (this.currentTrailGraphics) {
+                    this.currentTrailGraphics.destroy();
+                }
+                
+                this.currentTrailGraphics = this.scene.add.graphics();
+                
+                for (let i = 1; i < this.trailPoints.length; i++) {
+                    const alpha = i / this.trailPoints.length;
+                    const width = alpha * 3;
+                    
+                    this.currentTrailGraphics.lineStyle(width, 0x00AAFF, alpha * 0.8);
+                    this.currentTrailGraphics.beginPath();
+                    this.currentTrailGraphics.moveTo(this.trailPoints[i-1].x, this.trailPoints[i-1].y);
+                    this.currentTrailGraphics.lineTo(this.trailPoints[i].x, this.trailPoints[i].y);
+                    this.currentTrailGraphics.strokePath();
+                }
+                
+                this.scene.tweens.add({
+                    targets: this.currentTrailGraphics,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: () => {
+                        if (this.currentTrailGraphics) {
+                            this.currentTrailGraphics.destroy();
+                            this.currentTrailGraphics = null;
+                        }
+                    }
+                });
+            }
+            
+            createHitEffect(x, y) {
+                // 강화된 미사일 타격 이팩트
+                const explosion = this.scene.add.circle(x, y, 18, 0x00AAFF, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: explosion,
+                    scaleX: 3.2,
+                    scaleY: 3.2,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => explosion.destroy()
+                });
+                
+                // 추가 글로우 효과
+                const glow = this.scene.add.circle(x, y, 30, 0x87CEEB, 0.5);
+                
+                this.scene.tweens.add({
+                    targets: glow,
+                    scaleX: 2.0,
+                    scaleY: 2.0,
+                    alpha: 0,
+                    duration: 500,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => glow.destroy()
+                });
+                
+                this.createSparkParticles(x, y, 12);
+                
+                // 미니 반짝이 효과
+                this.createFlashEffect(x, y);
+            }
+            
+            // 일반공격과 동일한 타격 이팩트 (미사일 색상으로)
+            createBulletStyleHitEffect(x, y) {
+                // 메인 폭발 (미사일 색상 - 더 크고 강렬하게)
+                const explosion = this.scene.add.circle(x, y, 20, 0x00AAFF, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: explosion,
+                    scaleX: 3.5,
+                    scaleY: 3.5,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => explosion.destroy()
+                });
+                
+                // 외부 글로우 (더 크고 지속시간 증가)
+                const glow = this.scene.add.circle(x, y, 35, 0x87CEEB, 0.6);
+                
+                this.scene.tweens.add({
+                    targets: glow,
+                    scaleX: 2.5,
+                    scaleY: 2.5,
+                    alpha: 0,
+                    duration: 600,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => glow.destroy()
+                });
+                
+                // 샤크웨이브 (충격파)
+                const shockwave = this.scene.add.circle(x, y, 10, 0xFFFFFF, 0.8);
+                shockwave.setStrokeStyle(3, 0x00AAFF, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: shockwave,
+                    scaleX: 4,
+                    scaleY: 4,
+                    alpha: 0,
+                    duration: 500,
+                    ease: 'Power3.easeOut',
+                    onComplete: () => shockwave.destroy()
+                });
+                
+                // 미사일 색상 스파크 (더 많이)
+                this.createSparkParticles(x, y, 15);
+                
+                // 추가 반짝이 자극 효과
+                this.createFlashEffect(x, y);
+                
+                // 카메라 살짝 흔들기
+                if (this.scene.cameras && this.scene.cameras.main) {
+                    this.scene.cameras.main.shake(100, 0.008);
+                }
+            }
+            
+            createBounceEffect(fromX, fromY, toX, toY) {
+                // 유도미사일 노란색 트레일 효과 제거 (사용자 요청)
+                // 바운스 효과를 파란색으로 변경하여 yellow 제거
+                const spark = this.scene.add.circle(fromX, fromY, 8, 0x00AAFF, 0.8);
+                
+                this.scene.tweens.add({
+                    targets: spark,
+                    scaleX: 2,
+                    scaleY: 2,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: () => spark.destroy()
+                });
+                
+                const angle = Phaser.Math.Angle.Between(fromX, fromY, toX, toY);
+                this.createDirectionParticles(fromX, fromY, angle);
+            }
+            
+            createSparkParticles(x, y, count = 8) {
+                for (let i = 0; i < count; i++) {
+                    const particle = this.scene.add.circle(x, y, 3, 0x00AAFF, 0.9);
+                    
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 30 + Math.random() * 50;
+                    
+                    this.scene.tweens.add({
+                        targets: particle,
+                        x: x + Math.cos(angle) * distance,
+                        y: y + Math.sin(angle) * distance,
+                        alpha: 0,
+                        scaleX: 0.1,
+                        scaleY: 0.1,
+                        duration: 300 + Math.random() * 400,
+                        ease: 'Power2.easeOut',
+                        onComplete: () => particle.destroy()
+                    });
+                }
+            }
+            
+            // 반짝이는 자극 효과
+            createFlashEffect(x, y) {
+                const flash = this.scene.add.circle(x, y, 25, 0xFFFFFF, 0.9);
+                
+                this.scene.tweens.add({
+                    targets: flash,
+                    alpha: 0,
+                    duration: 150,
+                    ease: 'Power3.easeOut',
+                    onComplete: () => flash.destroy()
+                });
+            }
+            
+            // 반대방향 튕김 시각 효과
+            createBounceBackEffect(x, y, bounceAngle) {
+                // 튕김 방향 표시 주황색 에너지
+                const bounceIndicator = this.scene.add.circle(x, y, 15, 0x00AAFF, 0.9); // 노란색 제거
+                const targetX = x + Math.cos(bounceAngle) * 40;
+                const targetY = y + Math.sin(bounceAngle) * 40;
+                
+                this.scene.tweens.add({
+                    targets: bounceIndicator,
+                    x: targetX,
+                    y: targetY,
+                    scaleX: 0.3,
+                    scaleY: 0.3,
+                    alpha: 0,
+                    duration: 300,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => bounceIndicator.destroy()
+                });
+                
+                // 튕김 충격파
+                const bounceWave = this.scene.add.circle(x, y, 8, 0x00AAFF, 0.7); // 노란색 제거
+                bounceWave.setStrokeStyle(2, 0xFF6600, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: bounceWave,
+                    scaleX: 3,
+                    scaleY: 3,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power3.easeOut',
+                    onComplete: () => bounceWave.destroy()
+                });
+            }
+            
+            // 튕김 트레일 효과
+            createBounceTrailEffect(startX, startY, endX, endY) {
+                const trail = this.scene.add.graphics();
+                trail.lineStyle(6, 0x00AAFF, 0.8); // 노란색 제거
+                trail.beginPath();
+                trail.moveTo(startX, startY);
+                trail.lineTo(endX, endY);
+                trail.strokePath();
+                
+                this.scene.tweens.add({
+                    targets: trail,
+                    alpha: 0,
+                    duration: 500,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => trail.destroy()
+                });
+            }
+            
+            createDirectionParticles(x, y, angle) {
+                for (let i = 0; i < 3; i++) {
+                    const particle = this.scene.add.circle(x, y, 1, 0x00AAFF, 0.6); // 노란색 제거
+                    const distance = 15 + (i * 10);
+                    
+                    this.scene.tweens.add({
+                        targets: particle,
+                        x: x + Math.cos(angle) * distance,
+                        y: y + Math.sin(angle) * distance,
+                        alpha: 0,
+                        duration: 150 + (i * 50),
+                        ease: 'Power1.easeOut',
+                        onComplete: () => particle.destroy()
+                    });
+                }
+            }
+            
+            destroyMissile() {
+                // 미사일 소멸 시 폭발 효과 생성
+                if (this.active && this.scene && this.scene.createExplosion) {
+                    this.scene.createExplosion(this.x, this.y);
+                    console.log('💥 미사일 소멸 폭발 효과 생성');
+                }
+                
+                this.setActive(false).setVisible(false);
+                this.glowEffect.setVisible(false);
+                this.body.stop();
+                
+                if (this.currentTrailGraphics) {
+                    this.currentTrailGraphics.destroy();
+                    this.currentTrailGraphics = null;
+                }
+                
+                this.state = 'INACTIVE';
+                this.target = null;
+                this.visitedTargets.clear();
+                this.trailPoints = [];
+                this.currentLifetime = 0;
+                this.wanderingTime = 0;
+                this.targetingDelay = 0;
+                this.hasFoundNewTarget = false;
+                this.newTarget = null;
+            }
+            
+            // 강화된 반대방향 튕김 효과 (MapleStory 스타일)
+            performEnhancedBounceBack(hitEnemy) {
+                // 피격된 적 방향의 반대로 강하게 튕김
+                const hitDirection = Phaser.Math.Angle.Between(this.x, this.y, hitEnemy.x, hitEnemy.y);
+                const bounceAngle = hitDirection + Math.PI; // 반대 방향
+                
+                // 큐빅 베지어 속도 리셋 + 강화된 튕김 (더 강하게)
+                this.currentSpeed = this.speedMax * (this.bounceBackForce + 0.5); // 3배 가속
+                
+                // 물리 속도 즉시 적용
+                this.scene.physics.velocityFromRotation(bounceAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = bounceAngle;
+                
+                // 반대방향 튕김 시각 효과
+                this.createBounceBackEffect(this.x, this.y, bounceAngle);
+                
+                // 대시 참조점 저장 (시각적 지연 효과용)
+                const bounceStartX = this.x;
+                const bounceStartY = this.y;
+                
+                // 0.4초 동안 튕김 상태 유지
+                this.scene.time.delayedCall(100, () => {
+                    if (this.active) {
+                        // 유도미사일 노란색 트레일 효과 제거 (사용자 요청)
+                        // this.createBounceTrailEffect(bounceStartX, bounceStartY, this.x, this.y);
+                    }
+                });
+                
+                // 0.4초 후 서서히 정상 속도로 복귀
+                this.scene.time.delayedCall(400, () => {
+                    if (this.active && (this.state === 'SEEKING' || this.state === 'BOUNCING')) {
+                        this.currentSpeed = this.speedMin;
+                    }
+                });
+            }
+            
+            // 배회 모드 진입
+            enterWanderingMode() {
+                this.state = 'WANDERING';
+                this.wanderingTime = 0;
+                this.targetingDelay = 0;
+                this.hasFoundNewTarget = false;
+                this.newTarget = null;
+                
+                // 배회 중심점 설정 (현재 위치)
+                this.wanderingBaseX = this.x;
+                this.wanderingBaseY = this.y;
+                this.lemniscatePhase = Math.random() * Math.PI * 2; // 랜덤 시작 위상
+                
+                console.log(`🌀 미사일 배회 모드 진입: (${Math.round(this.x)}, ${Math.round(this.y)})`);
+            }
+            
+            // Lemniscate (∞자 궤적) 배회 패턴
+            updateWanderingMovement(delta) {
+                const dt = delta / 1000;
+                this.wanderingTime += dt;
+                
+                // ∞자 궤적 계산 (Lemniscate of Bernoulli)
+                this.lemniscatePhase += dt * 2; // 위상 증가 속도
+                const t = this.lemniscatePhase;
+                
+                // x = a*cos(t)/(1+sin²(t)), y = a*cos(t)*sin(t)/(1+sin²(t))
+                const sinT = Math.sin(t);
+                const cosT = Math.cos(t);
+                const denominator = 1 + sinT * sinT;
+                
+                const lemniscateX = this.lemniscateScale * cosT / denominator;
+                const lemniscateY = this.lemniscateScale * cosT * sinT / denominator;
+                
+                // 목표 위치 계산
+                const targetX = this.wanderingBaseX + lemniscateX;
+                const targetY = this.wanderingBaseY + lemniscateY;
+                
+                // 목표를 향한 부드럽지만 눈에 띄는 이동
+                const desiredAngle = Phaser.Math.Angle.Between(this.x, this.y, targetX, targetY);
+                const currentAngle = this.body.velocity.angle();
+                const nextAngle = Phaser.Math.Angle.RotateTo(currentAngle, desiredAngle, this.turnRate * dt * 0.9); // 조금 더 민첩하게
+                
+                // 배회 중에도 적당한 속도 유지 (더 역동적)
+                const baseSpeed = this.speedMin * 0.9;
+                const speedVariation = Math.sin(this.lemniscatePhase * 0.5) * 30; // 속도 변화
+                const wanderingSpeed = baseSpeed + speedVariation;
+                this.scene.physics.velocityFromRotation(nextAngle, wanderingSpeed, this.body.velocity);
+                this.rotation = nextAngle;
+                
+                // 새로운 타겟 탐색 (0.5초마다)
+                if (Math.floor(this.wanderingTime * 2) > Math.floor((this.wanderingTime - dt) * 2)) {
+                    this.searchForNewTarget();
+                }
+                
+                // 4초 타임아웃 체크
+                if (this.wanderingTime > this.wanderingTimeout / 1000) {
+                    console.log('⏱️ 배회 타임아웃 → 미사일 소멸');
+                    this.destroyMissile();
+                }
+            }
+            
+            // 새로운 타겟 탐색 (2초 딜레이 시스템 포함)
+            searchForNewTarget() {
+                if (this.hasFoundNewTarget) {
+                    // 이미 타겟을 찾은 상태에서 2초 딜레이 처리
+                    this.targetingDelay += 500; // 0.5초씩 증가
+                    
+                    if (this.targetingDelay >= this.targetingDelayDuration) {
+                        console.log(`🎯 2초 딜레이 완료 → 새 타겟 공격 시작: ${this.newTarget.enemyType || 'unknown'}`);
+                        this.target = this.newTarget;
+                        this.state = 'SEEKING';
+                        this.wanderingTime = 0;
+                        this.targetingDelay = 0;
+                        this.hasFoundNewTarget = false;
+                        this.newTarget = null;
+                    }
+                    return;
+                }
+                
+                // 새로운 타겟 탐색
+                const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
+                    if (!enemy.active || this.visitedTargets.has(enemy)) return false;
+                    
+                    const distance = Phaser.Math.Distance.Between(this.x, this.y, enemy.x, enemy.y);
+                    return distance <= 300; // 300px 반경 내
+                });
+                
+                if (nearbyEnemies.length > 0) {
+                    // 가장 가까운 적 선택
+                    const closestEnemy = nearbyEnemies.reduce((closest, enemy) => {
+                        const distance = Phaser.Math.Distance.Between(this.x, this.y, enemy.x, enemy.y);
+                        const closestDistance = Phaser.Math.Distance.Between(this.x, this.y, closest.x, closest.y);
+                        return distance < closestDistance ? enemy : closest;
+                    });
+                    
+                    console.log(`🔍 배회 중 새 타겟 발견: ${closestEnemy.enemyType || 'unknown'} → 2초 후 공격 시작`);
+                    this.newTarget = closestEnemy;
+                    this.hasFoundNewTarget = true;
+                    this.targetingDelay = 0;
+                }
+            }
+        };
+        
+        // MissileSkillManager 클래스 인라인 구현
+        this.MissileSkillManager = class MissileSkillManager {
+            constructor(gameScene) {
+                this.scene = gameScene;
+                this.launchStack = 0;
+                this.bounceStack = 0;
+                this.launchCooldown = 3000;
+                this.isActive = false;
+                this.lastLaunchTime = 0;
+                
+                this.setupLaunchTimer();
+            }
+            
+            setupLaunchTimer() {
+                this.launchTimer = this.scene.time.addEvent({
+                    delay: this.launchCooldown,
+                    callback: () => this.attemptLaunch(),
+                    loop: true
+                });
+            }
+            
+            updateStacks(launchStack, bounceStack) {
+                this.launchStack = Math.min(launchStack, 10);
+                this.bounceStack = Math.min(bounceStack, 3);
+                this.isActive = this.launchStack > 0;
+            }
+            
+            attemptLaunch() {
+                if (!this.isActive || this.launchStack <= 0) return;
+                
+                if (!this.scene.player || !this.scene.player.active || this.scene.isSkillSelectionActive) {
+                    return;
+                }
+                
+                const targets = this.findLaunchTargets();
+                if (targets.length === 0) return;
+                
+                this.executeLaunch(targets);
+                this.lastLaunchTime = Date.now();
+            }
+            
+            findLaunchTargets() {
+                const playerX = this.scene.player.x;
+                const playerY = this.scene.player.y;
+                const searchRange = 400;
+                
+                const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
+                    if (!enemy.active) return false;
+                    
+                    const distance = Phaser.Math.Distance.Between(
+                        playerX, playerY, enemy.x, enemy.y
+                    );
+                    
+                    return distance <= searchRange;
+                });
+                
+                nearbyEnemies.sort((a, b) => {
+                    const distA = Phaser.Math.Distance.Between(playerX, playerY, a.x, a.y);
+                    const distB = Phaser.Math.Distance.Between(playerX, playerY, b.x, b.y);
+                    return distA - distB;
+                });
+                
+                return nearbyEnemies;
+            }
+            
+            executeLaunch(targets) {
+                const launchCount = Math.min(this.launchStack, targets.length, 10);
+                const playerX = this.scene.player.x;
+                const playerY = this.scene.player.y;
+                
+                for (let i = 0; i < launchCount; i++) {
+                    const target = targets[i % targets.length];
+                    
+                    // 각 타겟에 대해 2개의 미사일을 발사 (듀얼 미사일 시스템)
+                    for (let dualIndex = 0; dualIndex < 2; dualIndex++) {
+                        const angle = (i / launchCount) * Math.PI * 2;
+                        const dualOffset = (dualIndex - 0.5) * 25; // 좌우로 약간 간격을 둠
+                        const offsetDistance = 20;
+                        const launchX = playerX + Math.cos(angle) * offsetDistance + Math.cos(angle + Math.PI/2) * dualOffset;
+                        const launchY = playerY + Math.sin(angle) * offsetDistance + Math.sin(angle + Math.PI/2) * dualOffset;
+                        
+                        const delay = i * 50 + dualIndex * 100; // 듀얼 미사일 간격
+                        this.scene.time.delayedCall(delay, () => {
+                            const missile = this.scene.missilePool.get(launchX, launchY);
+                            if (missile) {
+                                const success = missile.launch(target, this.bounceStack);
+                                if (success) {
+                                    this.createLaunchEffect(launchX, launchY, target.x, target.y);
+                                }
+                            }
+                        });
+                    }
+                }
+                
+                this.scene.showAutoSkillText(`듀얼 미사일 발사! ${launchCount}×2발`);
+            }
+            
+            createLaunchEffect(x, y, targetX, targetY) {
+                const smoke = this.scene.add.circle(x, y, 10, 0x666666, 0.4);
+                
+                this.scene.tweens.add({
+                    targets: smoke,
+                    scaleX: 2,
+                    scaleY: 2,
+                    alpha: 0,
+                    duration: 400,
+                    onComplete: () => smoke.destroy()
+                });
+                
+                const angle = Phaser.Math.Angle.Between(x, y, targetX, targetY);
+                for (let i = 0; i < 3; i++) {
+                    const spark = this.scene.add.circle(x, y, 2, 0x00AAFF, 0.8);
+                    const distance = 15 + (i * 8);
+                    
+                    this.scene.tweens.add({
+                        targets: spark,
+                        x: x + Math.cos(angle) * distance,
+                        y: y + Math.sin(angle) * distance,
+                        alpha: 0,
+                        duration: 150 + (i * 30),
+                        onComplete: () => spark.destroy()
+                    });
+                }
+            }
+            
+            cleanup() {
+                if (this.launchTimer) {
+                    this.launchTimer.destroy();
+                    this.launchTimer = null;
+                }
+            }
+        };
+    }
+    
+    // 미사일 스킬 업데이트
+    updateMissileStacks() {
+        if (!this.missileSkillManager) return;
+        
+        const launchStack = this.skillSystem.skillStacks.get('guided_missile') || 0;
+        this.missileSkillManager.updateStacks(launchStack, 0); // bouncing_missile 스킬 제거됨
+    }
+    
+    // 미사일 스킬 처리
+    handleMissileSkills(skill) {
+        if (skill.effect && skill.effect.action === 'activate_guided_missile') {
+            this.updateMissileStacks();
+            return true;
+        } else if (skill.effect && skill.effect.action === 'enhance_missile_bounce') {
+            this.updateMissileStacks();
+            return true;
+        }
+        return false;
     }
 
     createGridBackground() {
@@ -1466,7 +2532,7 @@ class GameScene extends Phaser.Scene {
         
         const eliteMonster = this.physics.add.sprite(clampedX, clampedY, 'elite_monster');
         eliteMonster.enemyType = 'elite_monster';
-        eliteMonster.health = 50; // 10배 이상의 체력
+        eliteMonster.health = 100; // 2배 증가: 50 → 100
         eliteMonster.maxHealth = eliteMonster.health;
         eliteMonster.speed = this.baseEnemySpeed * 0.3; // 느린 속도
         eliteMonster.isHit = false;
@@ -1515,7 +2581,7 @@ class GameScene extends Phaser.Scene {
         
         const pentagonMonster = this.physics.add.sprite(clampedX, clampedY, 'pentagon_monster');
         pentagonMonster.enemyType = 'pentagon_monster';
-        pentagonMonster.health = 8; // 중간 정도 체력
+        pentagonMonster.health = 16; // 2배 증가: 8 → 16
         pentagonMonster.maxHealth = pentagonMonster.health;
         pentagonMonster.speed = this.baseEnemySpeed * 0.6; // 느린 속도
         pentagonMonster.isHit = false;
@@ -1560,7 +2626,7 @@ class GameScene extends Phaser.Scene {
         
         const starEliteMonster = this.physics.add.sprite(clampedX, clampedY, 'star_elite_monster');
         starEliteMonster.enemyType = 'star_elite_monster';
-        starEliteMonster.health = 45; // 엘리트보다 약간 적은 체력
+        starEliteMonster.health = 90; // 2배 증가: 45 → 90
         starEliteMonster.maxHealth = starEliteMonster.health;
         starEliteMonster.speed = this.baseEnemySpeed * 0.4; // 느린 기본 속도
         starEliteMonster.isHit = false;
@@ -1627,6 +2693,11 @@ class GameScene extends Phaser.Scene {
         // L키로 레벨업 치트 (테스트용)
         if (Phaser.Input.Keyboard.JustDown(this.lKey)) {
             this.levelUp();
+        }
+        
+        // M키로 미사일 발사 테스트 (디버깅용)
+        if (Phaser.Input.Keyboard.JustDown(this.mKey)) {
+            this.testMissileFire();
         }
         
         // 스킬 선택 중이면 게임 로직 실행 중단
@@ -1699,10 +2770,10 @@ class GameScene extends Phaser.Scene {
         // 웨이브당 적 수 증가 (최대 4마리)
         this.enemiesPerWave = Math.min(4, Math.floor(this.difficultyLevel / 3) + 1);
         
-        // 적 기본 속도 증가 (더 완만하게 조정)
-        // 기본 속도 증가율 개선 (더 완만하게)
+        // 적 기본 속도 증가 (더욱 완만하게 조정 - 플레이어 요청)
+        // 기본 속도 증가율 절반으로 감소
         if (this.difficultyLevel <= 15) {
-            this.baseEnemySpeed = 100 + (this.difficultyLevel * 3); // 3씩 증가 (100 -> 145)
+            this.baseEnemySpeed = 100 + (this.difficultyLevel * 1.5); // 1.5씩 증가 (100 -> 122.5)
         } else {
             this.baseEnemySpeed = 145 + ((this.difficultyLevel - 15) * 2); // 2씩 증가
         }
@@ -1950,7 +3021,7 @@ class GameScene extends Phaser.Scene {
                     enemy.knockbackY = Math.sin(angle) * knockbackForce;
                     
                     // 약간의 데미지
-                    enemy.health -= 1;
+                    enemy.health -= 0.5;
                     
                     // 간단한 피격 효과
                     enemy.setTint(0xffcccc);
@@ -2108,8 +3179,8 @@ class GameScene extends Phaser.Scene {
         const clampedX = Phaser.Math.Clamp(x, 50, this.worldWidth - 50);
         const clampedY = Phaser.Math.Clamp(y, 50, this.worldHeight - 50);
         
-        // 적 속도 증가율 개선 (0.15 -> 0.08로 감소)
-        const difficultyMultiplier = 1 + (this.difficultyLevel * 0.08);
+        // 적 속도 증가율 더욱 감소 (0.08 -> 0.04로 절반 감소 - 플레이어 요청)
+        const difficultyMultiplier = 1 + (this.difficultyLevel * 0.04);
         const enemyTypes = ['enemy1', 'enemy2', 'enemy3'];
         const enemyType = enemyTypes[Phaser.Math.Between(0, 2)];
         
@@ -2130,13 +3201,13 @@ class GameScene extends Phaser.Scene {
 
     getEnemyHealth(type) {
         switch(type) {
-            case 'enemy1': return 1;
-            case 'enemy2': return 2;
-            case 'enemy3': return 3;
-            case 'pentagon_monster': return 8;
-            case 'elite_monster': return 50;
-            case 'star_elite_monster': return 45;
-            default: return 1;
+            case 'enemy1': return 2;  // 2배 증가: 1 → 2
+            case 'enemy2': return 4;  // 2배 증가: 2 → 4
+            case 'enemy3': return 6;  // 2배 증가: 3 → 6
+            case 'pentagon_monster': return 16; // 2배 증가: 8 → 16
+            case 'elite_monster': return 100;   // 2배 증가: 50 → 100
+            case 'star_elite_monster': return 90; // 2배 증가: 45 → 90
+            default: return 2; // 기본값도 2배
         }
     }
 
@@ -2564,7 +3635,7 @@ class GameScene extends Phaser.Scene {
     hitEnemy(bullet, enemy) {
         this.createExplosion(enemy.x, enemy.y);
         
-        enemy.health -= 1;
+        enemy.health -= 0.5;
         
         // 피격 효과가 이미 실행 중이 아닐 때만 실행
         if (!enemy.isFlashing) {
@@ -2813,6 +3884,23 @@ class GameScene extends Phaser.Scene {
                 });
             }
         });
+    }
+    
+    // 미사일과 적 충돌 처리 (누락되었던 메서드 추가!)
+    missileHitEnemy(missile, enemy) {
+        if (!missile.active || !enemy.active) return;
+        
+        console.log('🚀💥 미사일-적 충돌 감지!', {
+            missileActive: missile.active,
+            enemyActive: enemy.active,
+            enemyType: enemy.enemyType || 'unknown',
+            enemyHealth: enemy.health
+        });
+        
+        // 미사일의 onHit 메서드 호출
+        if (missile.onHit && typeof missile.onHit === 'function') {
+            missile.onHit(enemy);
+        }
     }
 
     playerHit(player, enemy) {
@@ -3573,15 +4661,24 @@ class GameScene extends Phaser.Scene {
     
     // 특별 행동 스킬 처리
     applySpecialBehavior(skill) {
-        const behavior = skill.effect.behavior;
-        
-        // 스킬 시스템에 저장
-        if (!this.skillSystem.specialBehaviors) {
-            this.skillSystem.specialBehaviors = new Set();
+        // 미사일 스킬 처리
+        if (skill.effect.action === 'activate_guided_missile' || skill.effect.action === 'enhance_missile_bounce') {
+            this.updateMissileStacks();
+            console.log(`미사일 스킬 활성화: ${skill.name}`);
+            return;
         }
-        this.skillSystem.specialBehaviors.add(behavior);
         
-        console.log(`특별 행동 스킬 활성화: ${behavior}`);
+        // 기존 behavior 처리
+        const behavior = skill.effect.behavior;
+        if (behavior) {
+            // 스킬 시스템에 저장
+            if (!this.skillSystem.specialBehaviors) {
+                this.skillSystem.specialBehaviors = new Set();
+            }
+            this.skillSystem.specialBehaviors.add(behavior);
+            
+            console.log(`특별 행동 스킬 활성화: ${behavior}`);
+        }
     }
     
     // 대쉬 스킬 효과 처리 (완전 재설계)
