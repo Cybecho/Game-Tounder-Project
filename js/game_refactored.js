@@ -866,7 +866,6 @@ class GameScene extends Phaser.Scene {
                     range: 80 + (skillLevel * 20)
                 };
                 
-                console.log(`🌩️ 랜덤 번개 활성화! 레벨: ${skillLevel}, 지속시간: ${duration}ms, 간격: ${config.strikeInterval}ms`);
                 
                 // 단순한 반복 타이머 사용 (내장 반복 종료 기능 활용)
                 this.electricSkillSystem.activeRandomLightning = this.time.addEvent({
@@ -880,7 +879,6 @@ class GameScene extends Phaser.Scene {
                 });
                 
                 // 영구적 스킬로 변경 - 종료 타이머 제거
-                console.log('🌩️ 랜덤 번개 영구 활성화! (게임오버까지 지속)');
                 
                 this.showAutoSkillText(`천둥번개 Lv.${skillLevel} 활성화!`);
                 return true;
@@ -993,9 +991,7 @@ class GameScene extends Phaser.Scene {
     // 미사일 풀 생성 후 미사일 충돌 감지 설정
     setupMissileCollisions() {
         if (this.missilePool) {
-            console.log('🚀 미사일 충돌 감지 설정 중...');
             this.physics.add.overlap(this.missilePool, this.enemies, this.missileHitEnemy, null, this);
-            console.log('✅ 미사일-적 충돌 감지 설정 완료!');
         } else {
             console.warn('❌ 미사일 풀이 없어서 충돌 감지를 설정할 수 없습니다!');
         }
@@ -1003,7 +999,6 @@ class GameScene extends Phaser.Scene {
 
     // M키 미사일 발사 테스트 메서드
     testMissileFire() {
-        console.log('🚀 M키 미사일 테스트 발사!');
         
         if (!this.missilePool) {
             console.warn('❌ 미사일 풀이 없습니다!');
@@ -1027,14 +1022,12 @@ class GameScene extends Phaser.Scene {
         });
         
         if (nearestEnemy) {
-            console.log(`🎯 타겟 발견: ${nearestEnemy.enemyType || 'unknown'}, 거리: ${Math.round(nearestDistance)}`);
             
             // 미사일 발사
             const missile = this.missilePool.get(this.player.x, this.player.y);
             if (missile) {
                 const success = missile.launch(nearestEnemy, 3); // 3번 바운스
                 if (success) {
-                    console.log('✅ 미사일 발사 성공!');
                 } else {
                     console.warn('❌ 미사일 발사 실패!');
                 }
@@ -1045,7 +1038,6 @@ class GameScene extends Phaser.Scene {
             console.warn('❌ 주변에 적이 없습니다!');
             
             // 테스트용 더미 타겟 생성
-            console.log('🎯 테스트용 더미 적 생성');
             const dummyEnemy = this.physics.add.sprite(
                 this.player.x + 200, this.player.y, 'enemy'
             );
@@ -1058,7 +1050,6 @@ class GameScene extends Phaser.Scene {
             const missile = this.missilePool.get(this.player.x, this.player.y);
             if (missile) {
                 missile.launch(dummyEnemy, 3);
-                console.log('✅ 테스트 더미에게 미사일 발사!');
             }
         }
     }
@@ -1083,21 +1074,11 @@ class GameScene extends Phaser.Scene {
         
         // 충돌 감지 설정
         this.physics.add.overlap(this.missilePool, this.enemies, (missile, enemy) => {
-            console.log('🎯 미사일-적 물리 충돌 감지!', {
-                missileActive: missile.active,
-                enemyActive: enemy.active,
-                missilePos: {x: Math.round(missile.x), y: Math.round(missile.y)},
-                enemyPos: {x: Math.round(enemy.x), y: Math.round(enemy.y)}
-            });
-            
             if (missile.active && enemy.active) {
                 missile.onHit(enemy);
-            } else {
-                console.log('⚠️ 충돌했지만 조건 불만족 - 스킵');
             }
         });
         
-        console.log('🚀 미사일 시스템 초기화 완료');
     }
     
     // 미사일 클래스들 로드 (인라인 구현)
@@ -1223,7 +1204,6 @@ class GameScene extends Phaser.Scene {
                 
                 // 타겟 유효성 체크 (배회 모드가 아닌 경우에만)
                 if (this.state !== 'WANDERING' && (!this.target || !this.target.active)) {
-                    console.log('🎯 타겟 소실 → 배회 모드 전환');
                     this.enterWanderingMode();
                     return;
                 }
@@ -1286,25 +1266,9 @@ class GameScene extends Phaser.Scene {
             onHit(enemy) {
                 if (!this.active || this.hitCooldown > 0 || this.state !== 'SEEKING') return;
                 
-                // 디버깅: 충돌 감지 로깅
-                console.log('💥 미사일 충돌 감지!', {
-                    missileActive: this.active,
-                    enemyActive: enemy.active,
-                    missileState: this.state,
-                    hitCooldown: this.hitCooldown,
-                    targetOnly: this.targetOnly,
-                    isTarget: enemy === this.target,
-                    enemyType: enemy.enemyType || 'unknown'
-                });
                 
                 // 타겟 전용 체크 비활성화 (미사일이 모든 적을 공격할 수 있도록)
-                // if (this.targetOnly && enemy !== this.target) {
-                //     console.log('⚠️ 비타겟 적 타격 - 데미지 없음');
-                //     this.createHitEffect(enemy.x, enemy.y);
-                //     return;
-                // }
                 
-                console.log(`💥 미사일 적 타격! ${enemy.enemyType || 'unknown'}, 남은 바운스: ${this.bounceLeft}`);
                 
                 // 일반공격과 동일한 타격 이팩트 발생 보장
                 this.createHitEffect(enemy.x, enemy.y);
@@ -1321,13 +1285,6 @@ class GameScene extends Phaser.Scene {
                 const previousHealth = enemy.health;
                 enemy.health -= this.damage;
                 
-                // 디버깅: 데미지 적용 로깅
-                console.log('🔥 미사일 데미지 적용:', {
-                    previousHealth: previousHealth,
-                    damage: this.damage,
-                    newHealth: enemy.health,
-                    enemyType: enemy.enemyType || 'unknown'
-                });
                 
                 // 미사일 데미지 표시 (더 큰 사이즈, 미사일 색상)
                 if (this.scene.showDamageNumber) {
@@ -1381,7 +1338,6 @@ class GameScene extends Phaser.Scene {
                 this.performEnhancedBounceBack(hitEnemy);
                 
                 if (this.bounceLeft < 0) {
-                    console.log('💥 미사일 바운스 횟수 소진 → 배회 모드 전환');
                     this.enterWanderingMode();
                     return;
                 }
@@ -1389,12 +1345,10 @@ class GameScene extends Phaser.Scene {
                 const nextTarget = this.findBounceTarget(hitEnemy);
                 
                 if (nextTarget) {
-                    console.log(`🎯 다음 바운스 타겟 발견: ${nextTarget.enemyType || 'unknown'}`);
                     this.target = nextTarget;
                     this.createBounceEffect(hitEnemy.x, hitEnemy.y, nextTarget.x, nextTarget.y);
                     this.state = 'SEEKING';
                 } else {
-                    console.log('🔍 바운스 타겟 없음 → 배회 모드 전환');
                     this.enterWanderingMode();
                 }
             }
@@ -1698,7 +1652,6 @@ class GameScene extends Phaser.Scene {
                 // 미사일 소멸 시 폭발 효과 생성
                 if (this.active && this.scene && this.scene.createExplosion) {
                     this.scene.createExplosion(this.x, this.y);
-                    console.log('💥 미사일 소멸 폭발 효과 생성');
                 }
                 
                 this.setActive(false).setVisible(false);
@@ -1770,7 +1723,6 @@ class GameScene extends Phaser.Scene {
                 this.wanderingBaseY = this.y;
                 this.lemniscatePhase = Math.random() * Math.PI * 2; // 랜덤 시작 위상
                 
-                console.log(`🌀 미사일 배회 모드 진입: (${Math.round(this.x)}, ${Math.round(this.y)})`);
             }
             
             // Lemniscate (∞자 궤적) 배회 패턴
@@ -1813,7 +1765,6 @@ class GameScene extends Phaser.Scene {
                 
                 // 4초 타임아웃 체크
                 if (this.wanderingTime > this.wanderingTimeout / 1000) {
-                    console.log('⏱️ 배회 타임아웃 → 미사일 소멸');
                     this.destroyMissile();
                 }
             }
@@ -1825,7 +1776,6 @@ class GameScene extends Phaser.Scene {
                     this.targetingDelay += 500; // 0.5초씩 증가
                     
                     if (this.targetingDelay >= this.targetingDelayDuration) {
-                        console.log(`🎯 2초 딜레이 완료 → 새 타겟 공격 시작: ${this.newTarget.enemyType || 'unknown'}`);
                         this.target = this.newTarget;
                         this.state = 'SEEKING';
                         this.wanderingTime = 0;
@@ -1852,7 +1802,6 @@ class GameScene extends Phaser.Scene {
                         return distance < closestDistance ? enemy : closest;
                     });
                     
-                    console.log(`🔍 배회 중 새 타겟 발견: ${closestEnemy.enemyType || 'unknown'} → 2초 후 공격 시작`);
                     this.newTarget = closestEnemy;
                     this.hasFoundNewTarget = true;
                     this.targetingDelay = 0;
@@ -3890,13 +3839,6 @@ class GameScene extends Phaser.Scene {
     missileHitEnemy(missile, enemy) {
         if (!missile.active || !enemy.active) return;
         
-        console.log('🚀💥 미사일-적 충돌 감지!', {
-            missileActive: missile.active,
-            enemyActive: enemy.active,
-            enemyType: enemy.enemyType || 'unknown',
-            enemyHealth: enemy.health
-        });
-        
         // 미사일의 onHit 메서드 호출
         if (missile.onHit && typeof missile.onHit === 'function') {
             missile.onHit(enemy);
@@ -4060,7 +4002,6 @@ class GameScene extends Phaser.Scene {
         // 스킬 선택 중임을 표시하는 플래그
         this.isSkillSelectionActive = true;
         
-        console.log('🔄 게임 일시정지: 스킬 선택 중');
     }
     
     generateRandomSkills(count = 3) {
@@ -4477,7 +4418,6 @@ class GameScene extends Phaser.Scene {
         // 물리 시뮬레이션 재개
         this.physics.world.resume();
         
-        console.log('▶️ 게임 재개: 스킬 선택 완료');
         
         // 레벨업 완료
         this.time.delayedCall(1000, () => {
@@ -4689,7 +4629,6 @@ class GameScene extends Phaser.Scene {
         }
         
         const behaviors = this.skillSystem.specialBehaviors;
-        console.log('🎯 대쉬 스킬 체크:', Array.from(behaviors));
         
         let skillActivated = false;
         
@@ -4722,7 +4661,6 @@ class GameScene extends Phaser.Scene {
         }
         
         if (!skillActivated) {
-            console.log('⚠️ 대쉬 스킬이 하나도 활성화되지 않음');
         }
     }
     
@@ -4740,7 +4678,6 @@ class GameScene extends Phaser.Scene {
     
     // 대쉬 넉백 스킬 구현 (완전 재설계)
     applyDashKnockback(startX, startY, endX, endY) {
-        console.log('🚀 대쉬 넉백 스킬 발동!');
         
         // 대쉬 경로에 시각적 트레일 생성
         this.createDashTrail(startX, startY, endX, endY, 0x00ff00, '넉백');
@@ -4775,12 +4712,10 @@ class GameScene extends Phaser.Scene {
             });
         }
         
-        console.log(`✅ 대쉬 넉백: ${hitEnemies.size}명 적중`);
     }
     
     // 대쉬 공격 스킬 구현 (완전 재설계)
     applyDashDamage(startX, startY, endX, endY) {
-        console.log('⚔️ 대쉬 공격 스킬 발동!');
         
         // 공격 트레일 생성
         this.createDashTrail(startX, startY, endX, endY, 0xff4444, '공격');
@@ -4829,12 +4764,10 @@ class GameScene extends Phaser.Scene {
             });
         }
         
-        console.log(`✅ 대쉬 공격: ${hitEnemies.size}명 ${hitEnemies.size * 4} 데미지`);
     }
     
     // 대쉬 폭발 스킬 구현 (완전 재설계)
     applyDashExplosion(endX, endY) {
-        console.log('💥 대쉬 폭발 스킬 발동!');
         
         const explosionRadius = 180; // 더 큰 폭발 범위
         let hitCount = 0;
@@ -4908,12 +4841,10 @@ class GameScene extends Phaser.Scene {
             });
         }
         
-        console.log(`✅ 대쉬 폭발: ${hitCount}명 적중, ${totalDamage} 총 데미지`);
     }
     
     // 대쉬 번개 스킬 구현 (완전 재설계)
     applyDashElectrify(startX, startY, endX, endY) {
-        console.log('⚡ 대쉬 번개 스킬 발동!');
         
         // 향상된 번개 대쉬 트레일 생성
         this.createLightningDashTrail(startX, startY, endX, endY);
@@ -4976,7 +4907,6 @@ class GameScene extends Phaser.Scene {
             this.createChainLightning(Array.from(hitEnemies));
         }
         
-        console.log(`✅ 대쉬 번개: ${hitEnemies.size}명 감전, ${hitEnemies.size * 3} 데미지`);
     }
     
     // 이중 파동파 스킬 구현
@@ -5186,7 +5116,6 @@ class GameScene extends Phaser.Scene {
             if (this.cursors) this.cursors.enabled = true;
             if (this.wasd) this.wasd.enabled = true;
             
-            console.log('✅ 플레이어 물리 상태 복구 완료');
             
         } catch (error) {
             console.error('❌ 플레이어 물리 복구 중 오류:', error);
@@ -5320,7 +5249,6 @@ class GameScene extends Phaser.Scene {
             onComplete: () => wave.destroy()
         });
         
-        console.log(`✅ 간단한 폭발 파동 이펙트 생성: ${waveRadius}px 반경`);
     }
     
     // 강화된 번개 효과 (간단한 버전)
@@ -5852,7 +5780,6 @@ class ChainLightningSystem {
         // 5. 첫 번째 점프 실행
         this.executeChainJump(chainData, sourceX, sourceY);
         
-        console.log(`⚡ 체인 라이트닝 시작: ID=${chainId}, 타겟=${initialTarget.enemyType || 'unknown'}`);
         return true;
     }
     
@@ -5990,7 +5917,6 @@ class ChainLightningSystem {
         const chainData = this.activeChains.get(chainId);
         if (!chainData) return;
         
-        console.log(`⚡ 체인 라이트닝 종료: ID=${chainId}, 총 ${chainData.targets.length}개 타겟`);
         
         // 체이닝된 타겟들을 해제
         chainData.targets.forEach(target => {
