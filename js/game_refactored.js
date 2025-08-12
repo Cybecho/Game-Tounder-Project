@@ -67,7 +67,12 @@ class StatModifierEngine {
         }
         
         // 게임 객체에 적용 (최소값 보장)
-        this.game[statName] = Math.max(1, finalValue);
+        // bulletPierce는 0이 유효한 값이므로 예외 처리
+        if (statName === 'bulletPierce') {
+            this.game[statName] = Math.max(0, finalValue);
+        } else {
+            this.game[statName] = Math.max(1, finalValue);
+        }
         
         // 물리 엔진에도 적용 (필요한 경우)
         this.applyToPhysicsEngine(statName, finalValue);
@@ -5639,20 +5644,63 @@ class GameScene extends Phaser.Scene {
         });
     }
     
-    // 메가 폭발 효과 (간단한 버전)
+    // 메가 폭발 효과 (폭발 반경에 맞는 강화된 버전)
     createMegaExplosion(x, y, radius) {
-        const explosion = this.add.graphics();
-        explosion.fillStyle(0xff6600, 0.8);
-        explosion.fillCircle(x, y, 30);
+        // 메인 폭발 이펙트 (폭발 반경 크기)
+        const mainExplosion = this.add.graphics();
+        mainExplosion.fillStyle(0xff6600, 0.9);
+        mainExplosion.fillCircle(x, y, radius * 0.8); // 폭발 반경의 80% 크기
         
+        // 외곽 충격파 링
+        const shockwaveRing = this.add.graphics();
+        shockwaveRing.lineStyle(8, 0xffaa00, 0.8);
+        shockwaveRing.strokeCircle(x, y, radius * 0.2);
+        
+        // 내부 핵심 폭발
+        const coreExplosion = this.add.graphics();
+        coreExplosion.fillStyle(0xffff00, 1.0);
+        coreExplosion.fillCircle(x, y, radius * 0.3);
+        
+        // 메인 폭발 애니메이션
         this.tweens.add({
-            targets: explosion,
-            scaleX: radius / 30,
-            scaleY: radius / 30,
+            targets: mainExplosion,
+            scaleX: 1.5,
+            scaleY: 1.5,
             alpha: 0,
             duration: 600,
-            onComplete: () => explosion.destroy()
+            onComplete: () => mainExplosion.destroy()
         });
+        
+        // 충격파 링 애니메이션
+        this.tweens.add({
+            targets: shockwaveRing,
+            scaleX: 3,
+            scaleY: 3,
+            alpha: 0,
+            duration: 800,
+            onComplete: () => shockwaveRing.destroy()
+        });
+        
+        // 핵심 폭발 애니메이션
+        this.tweens.add({
+            targets: coreExplosion,
+            scaleX: 2,
+            scaleY: 2,
+            alpha: 0,
+            duration: 400,
+            onComplete: () => coreExplosion.destroy()
+        });
+        
+        // 추가 폭발 파편 효과들
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const fragmentX = x + Math.cos(angle) * radius * 0.6;
+            const fragmentY = y + Math.sin(angle) * radius * 0.6;
+            
+            this.time.delayedCall(Phaser.Math.Between(50, 200), () => {
+                this.createExplosion(fragmentX, fragmentY, 0.5);
+            });
+        }
     }
     
     // 폭발 착지용 간단한 파동 이펙트
