@@ -22,7 +22,6 @@ class StatModifierEngine {
             lightningWaveCooldown: this.game.lightningWaveCooldown,
             lightningWaveRadius: this.game.lightningWaveRadius,
             bulletDamage: this.game.bulletDamage,
-            bulletPierce: this.game.bulletPierce,
             bulletKnockback: this.game.bulletKnockback,
             bulletAccuracy: this.game.bulletAccuracy,
             bulletSize: this.game.bulletSize,
@@ -67,12 +66,7 @@ class StatModifierEngine {
         }
         
         // 게임 객체에 적용 (최소값 보장)
-        // bulletPierce는 0이 유효한 값이므로 예외 처리
-        if (statName === 'bulletPierce') {
-            this.game[statName] = Math.max(0, finalValue);
-        } else {
-            this.game[statName] = Math.max(1, finalValue);
-        }
+        this.game[statName] = Math.max(1, finalValue);
         
         // 물리 엔진에도 적용 (필요한 경우)
         this.applyToPhysicsEngine(statName, finalValue);
@@ -463,23 +457,6 @@ const skillDefinitions = {
     
     // === 새로운 총알 스킬들 ===
     
-    piercing_bullets: {
-        id: 'piercing_bullets',
-        name: '관통 총알',
-        description: '총알이 적을 +1회 뚫습니다 (최대 3회)',
-        category: 'passive',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.08,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletPierce',
-            operation: 'add',
-            value: 1
-        }
-    },
-    
     damage_speed_tradeoff: {
         id: 'damage_speed_tradeoff',
         name: '강력한 총알',
@@ -786,7 +763,6 @@ class GameScene extends Phaser.Scene {
         
         // 새로운 총알 속성들
         this.bulletDamage = 1.0; // 기본 총알 데미지 (0.5 → 1.0으로 증가)
-        this.bulletPierce = 0; // 관통 횟수
         this.bulletKnockback = 200; // 기본 넉백 강도
         this.bulletAccuracy = 1.0; // 정확도 (1.0 = 완벽한 정확도)
         this.bulletSize = 1.0; // 총알 크기 배율
@@ -3299,10 +3275,10 @@ class GameScene extends Phaser.Scene {
         
         // 새로운 총알 속성 적용
         bullet.damage = this.bulletDamage;
-        bullet.pierce = this.bulletPierce;
         bullet.knockbackForce = this.bulletKnockback;
         bullet.isExplosive = this.explosiveBullets;
         bullet.setScale(this.bulletSize);
+        
         
         // 정확도 적용 (낮은 정확도일수록 각도에 랜덤성 추가)
         const accuracySpread = (1.0 - this.bulletAccuracy) * 0.2; // 최대 0.2 라디안 (약 11도) 편차
@@ -3319,10 +3295,10 @@ class GameScene extends Phaser.Scene {
         
         // 새로운 총알 속성 적용
         bullet.damage = this.bulletDamage;
-        bullet.pierce = this.bulletPierce;
         bullet.knockbackForce = this.bulletKnockback;
         bullet.isExplosive = this.explosiveBullets;
         bullet.setScale(this.bulletSize);
+        
         
         const angle = Phaser.Math.Angle.Between(x, y, target.x, target.y);
         
@@ -3988,17 +3964,7 @@ class GameScene extends Phaser.Scene {
             this.electricSkillSystem.triggerElectricChain(enemy, skillLevel);
         }
         
-        // 관통 처리
-        if (bullet.pierce && bullet.pierce > 0) {
-            bullet.pierce--;
-            // 관통 횟수가 남아있으면 총알을 파괴하지 않음
-            if (bullet.pierce <= 0) {
-                bullet.destroy();
-            }
-        } else {
-            bullet.destroy();
-        }
-        
+        // 먼저 적이 죽었는지 확인하고 처리
         if (enemy.health <= 0) {
             // 디버깅: 오각형 몬스터 죽음 로그
             if (enemy.enemyType === 'pentagon_monster') {
@@ -4026,6 +3992,9 @@ class GameScene extends Phaser.Scene {
             
             this.handleEnemyDeath(enemy);
         }
+        
+        // 총알 파괴
+        bullet.destroy();
     }
 
     getEnemyPoints(type) {
