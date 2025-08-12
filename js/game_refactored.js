@@ -20,7 +20,13 @@ class StatModifierEngine {
             maxPlayerHealth: this.game.maxPlayerHealth,
             dashCooldown: this.game.dashCooldown,
             lightningWaveCooldown: this.game.lightningWaveCooldown,
-            lightningWaveRadius: this.game.lightningWaveRadius
+            lightningWaveRadius: this.game.lightningWaveRadius,
+            bulletDamage: this.game.bulletDamage,
+            bulletPierce: this.game.bulletPierce,
+            bulletKnockback: this.game.bulletKnockback,
+            bulletAccuracy: this.game.bulletAccuracy,
+            bulletSize: this.game.bulletSize,
+            explosionRadiusMultiplier: this.game.explosionRadiusMultiplier
         };
     }
     
@@ -448,6 +454,161 @@ const skillDefinitions = {
             value: 1,
             modifiers: []
         }
+    },
+    
+    // === 새로운 총알 스킬들 ===
+    
+    piercing_bullets: {
+        id: 'piercing_bullets',
+        name: '관통 총알',
+        description: '총알이 적을 +1회 뚫습니다 (최대 3회)',
+        category: 'passive',
+        rarity: 'uncommon',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.08,
+        effect: {
+            type: 'stat_modifier',
+            target: 'bulletPierce',
+            operation: 'add',
+            value: 1
+        }
+    },
+    
+    damage_speed_tradeoff: {
+        id: 'damage_speed_tradeoff',
+        name: '강력한 총알',
+        description: '총알 공격력이 높아지지만, 총알 발사속도는 약간 줄어듭니다 (최대 3회)',
+        category: 'passive',
+        rarity: 'uncommon',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.08,
+        effect: {
+            type: 'stat_modifier',
+            target: 'bulletDamage',
+            operation: 'multiply',
+            value: 1.5,
+            secondaryEffect: {
+                target: 'fireRate',
+                operation: 'multiply',
+                value: 1.2 // 발사속도 20% 증가 (더 느려짐)
+            }
+        }
+    },
+    
+    double_shot: {
+        id: 'double_shot',
+        name: '연속 사격',
+        description: '총알을 발사할때, 연속으로 한번 더 발사합니다. 하지만 총알의 피해가 40% 줄어듭니다',
+        category: 'passive',
+        rarity: 'rare',
+        stackable: false,
+        probability: 0.05,
+        effect: {
+            type: 'special_behavior',
+            action: 'enable_double_shot',
+            value: 1
+        }
+    },
+    
+    enhanced_knockback: {
+        id: 'enhanced_knockback',
+        name: '강화된 넉백',
+        description: '총알의 넉백이 강화됩니다',
+        category: 'passive',
+        rarity: 'common',
+        stackable: false,
+        probability: 0.07,
+        effect: {
+            type: 'stat_modifier',
+            target: 'bulletKnockback',
+            operation: 'multiply',
+            value: 2.0
+        }
+    },
+    
+    improved_accuracy: {
+        id: 'improved_accuracy',
+        name: '정확도 향상',
+        description: '총알의 정확도가 더 높아집니다',
+        category: 'passive',
+        rarity: 'common',
+        stackable: false,
+        probability: 0.06,
+        effect: {
+            type: 'stat_modifier',
+            target: 'bulletAccuracy',
+            operation: 'multiply',
+            value: 1.5
+        }
+    },
+    
+    larger_bullets: {
+        id: 'larger_bullets',
+        name: '대형 총알',
+        description: '총알의 크기가 더 커집니다',
+        category: 'passive',
+        rarity: 'common',
+        stackable: false,
+        probability: 0.06,
+        effect: {
+            type: 'stat_modifier',
+            target: 'bulletSize',
+            operation: 'multiply',
+            value: 2.5 // 2.0 → 2.5로 더 크게 증가
+        }
+    },
+    
+    explosive_bullets: {
+        id: 'explosive_bullets',
+        name: '폭발 총알',
+        description: '총알이 대폭발하며, 주위 반경 적에게 강력한 범위 공격을 가합니다. 범위안에 있는 적은 총알의 60% 데미지를 입습니다',
+        category: 'passive',
+        rarity: 'rare',
+        stackable: false,
+        probability: 0.04,
+        effect: {
+            type: 'special_behavior',
+            action: 'enable_explosive_bullets',
+            value: 1
+        }
+    },
+    
+    // === 폭발 총알 조건부 스킬들 ===
+    
+    enhanced_explosion_radius: {
+        id: 'enhanced_explosion_radius',
+        name: '확장된 폭발',
+        description: '총알의 폭발 반경이 더 커집니다. 폭발 반경 내 적들에게 기본 공격력의 50% 데미지를 입힙니다 (최대 3회)',
+        category: 'passive',
+        rarity: 'uncommon',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.07,
+        prerequisite: 'explosive_bullets', // 폭발 총알 스킬 필요
+        effect: {
+            type: 'stat_modifier',
+            target: 'explosionRadiusMultiplier',
+            operation: 'add',
+            value: 0.3 // 30% 반경 증가
+        }
+    },
+    
+    shrapnel_explosion: {
+        id: 'shrapnel_explosion',
+        name: '파편 폭발',
+        description: '총알이 폭발하면, 주위에 3개의 작은 파편으로 나뉘어 잠시 시간 후에 작은 크기로 폭발합니다',
+        category: 'passive',
+        rarity: 'rare',
+        stackable: false,
+        probability: 0.05,
+        prerequisite: 'explosive_bullets', // 폭발 총알 스킬 필요
+        effect: {
+            type: 'special_behavior',
+            action: 'enable_shrapnel_explosion',
+            value: 1
+        }
     }
 };
 
@@ -617,6 +778,19 @@ class GameScene extends Phaser.Scene {
         this.score = 0;
         this.weaponLevel = 1;
         this.bulletCount = 1;
+        
+        // 새로운 총알 속성들
+        this.bulletDamage = 1.0; // 기본 총알 데미지 (0.5 → 1.0으로 증가)
+        this.bulletPierce = 0; // 관통 횟수
+        this.bulletKnockback = 200; // 기본 넉백 강도
+        this.bulletAccuracy = 1.0; // 정확도 (1.0 = 완벽한 정확도)
+        this.bulletSize = 1.0; // 총알 크기 배율
+        this.explosiveBullets = false; // 폭발 총알 여부
+        this.explosiveDamageRatio = 0.5; // 폭발 범위 데미지 비율 (50%)
+        this.explosionRadiusMultiplier = 1.0; // 폭발 반경 배율
+        this.shrapnelExplosionEnabled = false; // 파편 폭발 여부
+        this.doubleShotEnabled = false; // 연속 발사 여부
+        this.doubleShotDamageReduction = 0.4; // 연속 발사 데미지 감소율
         this.gameTime = 0;
         this.eliteKills = 0;
         
@@ -3078,6 +3252,37 @@ class GameScene extends Phaser.Scene {
                     );
                 }
                 
+                // 연속 사격 (Double Shot) 처리
+                if (this.doubleShotEnabled) {
+                    this.time.delayedCall(100, () => { // 0.1초 후 추가 발사
+                        for (let i = 0; i < this.bulletCount; i++) {
+                            let bulletAngle;
+                            let offsetX = 0;
+                            let offsetY = 0;
+                            
+                            if (this.bulletCount === 1) {
+                                bulletAngle = baseAngle;
+                            } else if (this.bulletCount === 2) {
+                                bulletAngle = baseAngle;
+                                const sideOffset = (i === 0) ? -8 : 8;
+                                offsetX = Math.cos(baseAngle + Math.PI / 2) * sideOffset;
+                                offsetY = Math.sin(baseAngle + Math.PI / 2) * sideOffset;
+                            } else {
+                                const spreadAngle = Math.PI / 6;
+                                const angleStep = spreadAngle / (this.bulletCount - 1);
+                                const startAngle = baseAngle - spreadAngle / 2;
+                                bulletAngle = startAngle + (i * angleStep);
+                            }
+                            
+                            this.createBulletWithAngle(
+                                this.player.x + offsetX, 
+                                this.player.y + offsetY, 
+                                bulletAngle
+                            );
+                        }
+                    });
+                }
+                
                 this.lastFired = time;
             }
         }
@@ -3087,8 +3292,19 @@ class GameScene extends Phaser.Scene {
         const bullet = this.physics.add.sprite(x, y, 'bullet');
         this.bullets.add(bullet);
         
-        const velocityX = Math.cos(angle) * this.bulletSpeed;
-        const velocityY = Math.sin(angle) * this.bulletSpeed;
+        // 새로운 총알 속성 적용
+        bullet.damage = this.bulletDamage;
+        bullet.pierce = this.bulletPierce;
+        bullet.knockbackForce = this.bulletKnockback;
+        bullet.isExplosive = this.explosiveBullets;
+        bullet.setScale(this.bulletSize);
+        
+        // 정확도 적용 (낮은 정확도일수록 각도에 랜덤성 추가)
+        const accuracySpread = (1.0 - this.bulletAccuracy) * 0.2; // 최대 0.2 라디안 (약 11도) 편차
+        const actualAngle = angle + Phaser.Math.FloatBetween(-accuracySpread, accuracySpread);
+        
+        const velocityX = Math.cos(actualAngle) * this.bulletSpeed;
+        const velocityY = Math.sin(actualAngle) * this.bulletSpeed;
         bullet.setVelocity(velocityX, velocityY);
     }
 
@@ -3096,9 +3312,21 @@ class GameScene extends Phaser.Scene {
         const bullet = this.physics.add.sprite(x, y, 'bullet');
         this.bullets.add(bullet);
         
+        // 새로운 총알 속성 적용
+        bullet.damage = this.bulletDamage;
+        bullet.pierce = this.bulletPierce;
+        bullet.knockbackForce = this.bulletKnockback;
+        bullet.isExplosive = this.explosiveBullets;
+        bullet.setScale(this.bulletSize);
+        
         const angle = Phaser.Math.Angle.Between(x, y, target.x, target.y);
-        const velocityX = Math.cos(angle) * this.bulletSpeed;
-        const velocityY = Math.sin(angle) * this.bulletSpeed;
+        
+        // 정확도 적용 (낮은 정확도일수록 각도에 랜덤성 추가)
+        const accuracySpread = (1.0 - this.bulletAccuracy) * 0.2; // 최대 0.2 라디안 (약 11도) 편차
+        const actualAngle = angle + Phaser.Math.FloatBetween(-accuracySpread, accuracySpread);
+        
+        const velocityX = Math.cos(actualAngle) * this.bulletSpeed;
+        const velocityY = Math.sin(actualAngle) * this.bulletSpeed;
         bullet.setVelocity(velocityX, velocityY);
     }
 
@@ -3580,11 +3808,156 @@ class GameScene extends Phaser.Scene {
         
         return nearestEnemy;
     }
+    
+    handleExplosiveBullet(bullet, hitEnemy) {
+        // 폭발 범위 계산 (반경 증강 스킬 적용)
+        const baseExplosionRadius = 120; // 기본 폭발 반경
+        const explosionRadius = baseExplosionRadius * this.explosionRadiusMultiplier;
+        const explosionDamage = (bullet.damage || this.bulletDamage || 1.0) * this.explosiveDamageRatio;
+        
+        // 범위 데미지 적용
+        this.enemies.children.entries.forEach(enemy => {
+            if (enemy.active && enemy !== hitEnemy) {
+                const distance = Phaser.Math.Distance.Between(bullet.x, bullet.y, enemy.x, enemy.y);
+                if (distance <= explosionRadius) {
+                    // 범위 데미지 적용
+                    enemy.health -= explosionDamage;
+                    
+                    // 폭발 범위 데미지 텍스트 표시
+                    this.createDamageText(enemy.x, enemy.y - 10, explosionDamage, true);
+                    
+                    // 폭발 넉백 효과
+                    const angle = Phaser.Math.Angle.Between(bullet.x, bullet.y, enemy.x, enemy.y);
+                    const explosionKnockback = (bullet.knockbackForce || this.bulletKnockback || 200) * 0.5;
+                    enemy.knockbackX = Math.cos(angle) * explosionKnockback;
+                    enemy.knockbackY = Math.sin(angle) * explosionKnockback;
+                    
+                    // 피격 효과
+                    if (!enemy.isFlashing) {
+                        enemy.isFlashing = true;
+                        this.createHitFlashEffect(enemy);
+                    }
+                    
+                    // 적이 죽었는지 확인
+                    if (enemy.health <= 0) {
+                        this.handleEnemyDeath(enemy);
+                    }
+                }
+            }
+        });
+        
+        // 파편 폭발 처리
+        if (this.shrapnelExplosionEnabled) {
+            this.createShrapnelExplosion(bullet.x, bullet.y);
+        }
+    }
+    
+    createShrapnelExplosion(x, y) {
+        // 3개의 파편을 랜덤 위치에 배치 (기본 120도에 변화 추가)
+        for (let i = 0; i < 3; i++) {
+            // 기본 각도에 랜덤 변화 추가 (±25도 범위)
+            const baseAngle = (i * Math.PI * 2) / 3; // 120도씩
+            const randomAngleOffset = (Math.random() - 0.5) * Math.PI / 3.6; // ±25도
+            const angle = baseAngle + randomAngleOffset;
+            
+            // 거리도 랜덤화 (45~75 픽셀)
+            const baseDistance = 60;
+            const randomDistance = baseDistance + (Math.random() - 0.5) * 30; // 45~75
+            const shrapnelX = x + Math.cos(angle) * randomDistance;
+            const shrapnelY = y + Math.sin(angle) * randomDistance;
+            
+            // 즉시 파편 폭발 (딜레이 제거)
+            // 작은 폭발을 위한 함수 바로 실행
+                // 작은 폭발 이펙트
+                this.createExplosion(shrapnelX, shrapnelY, 0.3);
+                
+                // 파편 폭발 범위 데미지
+                const shrapnelRadius = 60;
+                const shrapnelDamage = this.bulletDamage * 0.4; // 기본 데미지의 40%
+                
+                this.enemies.children.entries.forEach(enemy => {
+                    if (enemy.active) {
+                        const distance = Phaser.Math.Distance.Between(shrapnelX, shrapnelY, enemy.x, enemy.y);
+                        if (distance <= shrapnelRadius) {
+                            enemy.health -= shrapnelDamage;
+                            
+                            // 파편 폭발 데미지 텍스트 (주황색으로 구별)
+                            this.createDamageText(enemy.x, enemy.y - 5, shrapnelDamage, 'shrapnel');
+                            
+                            // 작은 넉백
+                            const knockbackAngle = Phaser.Math.Angle.Between(shrapnelX, shrapnelY, enemy.x, enemy.y);
+                            const knockback = 100;
+                            enemy.knockbackX = Math.cos(knockbackAngle) * knockback;
+                            enemy.knockbackY = Math.sin(knockbackAngle) * knockback;
+                            
+                            // 피격 효과
+                            if (!enemy.isFlashing) {
+                                enemy.isFlashing = true;
+                                this.createHitFlashEffect(enemy);
+                            }
+                            
+                            if (enemy.health <= 0) {
+                                this.handleEnemyDeath(enemy);
+                            }
+                        }
+                    }
+                });
+        }
+    }
+    
+    handleEnemyDeath(enemy) {
+        // 엘리트 몬스터 특별 처리
+        if (enemy.enemyType === 'elite_monster' || enemy.enemyType === 'star_elite_monster') {
+            // 체력바와 태그 제거
+            if (enemy.healthBarBg) enemy.healthBarBg.destroy();
+            if (enemy.healthBar) enemy.healthBar.destroy();
+            if (enemy.nameTag) enemy.nameTag.destroy();
+            
+            // 엘리트 카운터 감소
+            this.currentEliteCount--;
+            console.log(`Elite monster destroyed! Current elite count: ${this.currentEliteCount}`);
+            
+            // 더 많은 에너지 드롭
+            const energyCount = enemy.enemyType === 'star_elite_monster' ? 6 : 8;
+            for (let i = 0; i < energyCount; i++) {
+                const angle = (i / energyCount) * Math.PI * 2;
+                const distance = 60;
+                const energyX = enemy.x + Math.cos(angle) * distance;
+                const energyY = enemy.y + Math.sin(angle) * distance;
+                
+                const energyOrb = this.physics.add.sprite(energyX, energyY, 'energy');
+                this.energy.add(energyOrb);
+            }
+        } else {
+            // 일반 적 처리
+            const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
+            this.energy.add(energyOrb);
+        }
+        
+        // 공통 처리
+        this.createExplosion(enemy.x, enemy.y);
+        const points = this.getEnemyPoints(enemy.enemyType);
+        this.score += points;
+        enemy.destroy();
+        
+        // UI 업데이트
+        this.updateUI();
+    }
 
     hitEnemy(bullet, enemy) {
-        this.createExplosion(enemy.x, enemy.y);
+        // 폭발 총알인 경우 10배 큰 폭발 이펙트 사용
+        if (bullet.isExplosive) {
+            this.createExplosion(enemy.x, enemy.y, 1.0); // 기본 0.1 * 10 = 1.0 (매우 큰 폭발)
+        } else {
+            this.createExplosion(enemy.x, enemy.y); // 기본 폭발
+        }
         
-        enemy.health -= 0.5;
+        // 총알 데미지 적용 (기본값 또는 총알에 저장된 값 사용)
+        const damage = bullet.damage || this.bulletDamage || 0.5;
+        enemy.health -= damage;
+        
+        // 데미지 텍스트 표시
+        this.createDamageText(enemy.x, enemy.y - 20, damage, bullet.isExplosive);
         
         // 피격 효과가 이미 실행 중이 아닐 때만 실행
         if (!enemy.isFlashing) {
@@ -3592,11 +3965,17 @@ class GameScene extends Phaser.Scene {
             this.createHitFlashEffect(enemy);
         }
         
-        // 바둑알처럼 강한 넉백 효과
-        const knockbackForce = enemy.enemyType === 'elite_monster' ? 100 : 200;
+        // 넉백 효과 (총알의 넉백 강도 적용)
+        const bulletKnockback = bullet.knockbackForce || this.bulletKnockback || 200;
+        const knockbackForce = enemy.enemyType === 'elite_monster' ? bulletKnockback * 0.5 : bulletKnockback;
         const angle = Phaser.Math.Angle.Between(bullet.x, bullet.y, enemy.x, enemy.y);
         enemy.knockbackX = Math.cos(angle) * knockbackForce;
         enemy.knockbackY = Math.sin(angle) * knockbackForce;
+        
+        // 폭발 총알 처리 (범위 데미지)
+        if (bullet.isExplosive) {
+            this.handleExplosiveBullet(bullet, enemy);
+        }
         
         // 전기 체인 스킬 확인 및 발동
         if (this.skillSystem.selectedSkills.has('electric_chain') && this.electricSkillSystem) {
@@ -3604,31 +3983,26 @@ class GameScene extends Phaser.Scene {
             this.electricSkillSystem.triggerElectricChain(enemy, skillLevel);
         }
         
-        bullet.destroy();
+        // 관통 처리
+        if (bullet.pierce && bullet.pierce > 0) {
+            bullet.pierce--;
+            // 관통 횟수가 남아있으면 총알을 파괴하지 않음
+            if (bullet.pierce <= 0) {
+                bullet.destroy();
+            }
+        } else {
+            bullet.destroy();
+        }
         
         if (enemy.health <= 0) {
-            // 엘리트 몬스터 특별 처리
+            // 디버깅: 오각형 몬스터 죽음 로그
+            if (enemy.enemyType === 'pentagon_monster') {
+                console.log(`Pentagon monster destroyed!`);
+            }
+            
+            // 엘리트 킬 카운트 (handleEnemyDeath 호출 전에 해야함)
             if (enemy.enemyType === 'elite_monster' || enemy.enemyType === 'star_elite_monster') {
-                // 체력바와 태그 제거
-                if (enemy.healthBarBg) enemy.healthBarBg.destroy();
-                if (enemy.healthBar) enemy.healthBar.destroy();
-                if (enemy.nameTag) enemy.nameTag.destroy();
-                
-                // 엘리트 카운터 감소
-                this.currentEliteCount--;
-                console.log(`Elite monster destroyed! Current elite count: ${this.currentEliteCount}`);
-                
-                // 더 많은 에너지 드롭
-                const energyCount = enemy.enemyType === 'star_elite_monster' ? 6 : 8;
-                for (let i = 0; i < energyCount; i++) {
-                    const angle = (i / energyCount) * Math.PI * 2;
-                    const distance = 60;
-                    const energyX = enemy.x + Math.cos(angle) * distance;
-                    const energyY = enemy.y + Math.sin(angle) * distance;
-                    
-                    const energyOrb = this.physics.add.sprite(energyX, energyY, 'energy');
-                    this.energy.add(energyOrb);
-                }
+                this.eliteKills++;
                 
                 // 엘리트 죽음 효과
                 const shakeIntensity = enemy.enemyType === 'star_elite_monster' ? 0.04 : 0.05;
@@ -3643,25 +4017,9 @@ class GameScene extends Phaser.Scene {
                         );
                     });
                 }
-            } else {
-                const energyOrb = this.physics.add.sprite(enemy.x, enemy.y, 'energy');
-                this.energy.add(energyOrb);
             }
             
-            // 디버깅: 오각형 몬스터 죽음 로그
-            if (enemy.enemyType === 'pentagon_monster') {
-                console.log(`Pentagon monster destroyed!`);
-            }
-            
-            enemy.destroy();
-            
-            const points = this.getEnemyPoints(enemy.enemyType);
-            this.score += points;
-            
-            // 엘리트 킬 카운트
-            if (enemy.enemyType === 'elite_monster' || enemy.enemyType === 'star_elite_monster') {
-                this.eliteKills++;
-            }
+            this.handleEnemyDeath(enemy);
         }
     }
 
@@ -3703,11 +4061,46 @@ class GameScene extends Phaser.Scene {
         });
     }
 
-    createExplosion(x, y) {
+    createExplosion(x, y, scale = 0.1) {
         const explosion = this.add.sprite(x, y, 'explosion');
-        explosion.setScale(0.1);
+        explosion.setScale(scale);
         explosion.setAlpha(1);
         this.explosions.add(explosion);
+    }
+    
+    createDamageText(x, y, damage, isExplosive = false) {
+        let color, fontSize;
+        
+        if (isExplosive === 'shrapnel') {
+            color = '#FF8844'; // 파편: 주황색
+            fontSize = '12px';
+        } else if (isExplosive) {
+            color = '#FF4444'; // 폭발: 빨강
+            fontSize = '18px';
+        } else {
+            color = '#FFFF44'; // 일반: 노랑
+            fontSize = '14px';
+        }
+        
+        const damageText = this.add.text(x, y, `-${damage.toFixed(1)}`, {
+            fontSize: fontSize,
+            color: color,
+            stroke: '#000000',
+            strokeThickness: 2,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        // 데미지 텍스트 애니메이션 (위로 올라가면서 페이드아웃)
+        this.tweens.add({
+            targets: damageText,
+            y: y - 40,
+            alpha: 0,
+            duration: 800,
+            ease: 'Power2',
+            onComplete: () => {
+                damageText.destroy();
+            }
+        });
     }
 
     shakeCamera(duration, intensity) {
@@ -4045,6 +4438,11 @@ class GameScene extends Phaser.Scene {
     }
     
     canSelectSkill(skill) {
+        // 전제 조건 확인 (prerequisite 스킬 보유 여부)
+        if (skill.prerequisite && !this.skillSystem.selectedSkills.has(skill.prerequisite)) {
+            return false;
+        }
+        
         // 일회성 스킬 (stackable: false)인 경우 한 번만 선택 가능
         if (!skill.stackable) {
             return !this.skillSystem.selectedSkills.has(skill.id);
@@ -4251,6 +4649,17 @@ class GameScene extends Phaser.Scene {
             skill.effect.operation,
             skill.effect.value
         );
+        
+        // 이차 효과 처리 (예: 강력한 총알의 발사속도 감소)
+        if (skill.effect.secondaryEffect) {
+            const secondaryModifierId = `${skill.id}_secondary_${Date.now()}`;
+            this.statModifierEngine.addModifier(
+                skill.effect.secondaryEffect.target,
+                secondaryModifierId,
+                skill.effect.secondaryEffect.operation,
+                skill.effect.secondaryEffect.value
+            );
+        }
     }
     
     applyInstantEffect(skill) {
@@ -4606,6 +5015,23 @@ class GameScene extends Phaser.Scene {
             this.updateMissileStacks();
             console.log(`미사일 스킬 활성화: ${skill.name}`);
             return;
+        }
+        
+        // 새로운 총알 스킬 처리
+        switch(skill.effect.action) {
+            case 'enable_double_shot':
+                this.doubleShotEnabled = true;
+                this.bulletDamage *= (1 - this.doubleShotDamageReduction); // 데미지 감소 적용
+                console.log(`연속 사격 활성화: 데미지 40% 감소`);
+                break;
+            case 'enable_explosive_bullets':
+                this.explosiveBullets = true;
+                console.log(`폭발 총알 활성화`);
+                break;
+            case 'enable_shrapnel_explosion':
+                this.shrapnelExplosionEnabled = true;
+                console.log(`파편 폭발 활성화`);
+                break;
         }
         
         // 기존 behavior 처리
