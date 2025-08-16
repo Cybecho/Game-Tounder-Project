@@ -460,6 +460,42 @@ const skillDefinitions = {
             modifiers: []
         }
     },
+
+    electric_field: {
+        id: 'electric_field',
+        name: '전기장판',
+        description: '플레이어 주위에 전기장판을 둡니다. 장판은 주기적으로 적에게 데미지를 입히며, 중첩될때마다 장판의 크기가 더 커집니다 (최대 3회)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 3,
+        probability: 0.04,
+        effect: {
+            type: 'timed_buff',
+            buffId: 'electric_field_zone',
+            duration: 999999999, // 거의 영구적 (게임오버까지 지속)
+            action: 'activate_electric_field',
+            value: 1,
+            modifiers: []
+        }
+    },
+
+    lightning_guided_chain: {
+        id: 'lightning_guided_chain',
+        name: '번개 유도미사일',
+        description: '유도미사일 활성화시에만 등장합니다. 20% 확률로, 유도미사일이 가격한 적 주변 다른적에게 전기 체인 공격을 1회 전이합니다 (중첩했을때, 최대 2회 까지 전이됩니다)',
+        category: 'skill',
+        rarity: 'rare',
+        stackable: true,
+        maxStacks: 2,
+        probability: 0.05,
+        conditions: ['guided_missile'], // 유도미사일 스킬이 있을 때만 등장
+        effect: {
+            type: 'special_behavior',
+            action: 'activate_lightning_guided_chain',
+            value: 1
+        }
+    },
     
     // === 새로운 총알 스킬들 ===
     
@@ -1012,6 +1048,12 @@ class GameScene extends Phaser.Scene {
         this.electricSkillSystem = {
             activeRandomLightning: null,
             lightningStrikeCount: 0,
+            electricFieldZones: [], // 전기장판들
+            electricFieldLevel: 0,
+            activeElectricField: null, // 전기장판 데미지 타이머
+            electricFieldRing: null, // 지속적인 전기 링 (단순화)
+            ringUpdateEvent: null, // 링 업데이트 이벤트
+            // 패턴 캐시 제거됨 - 정적 렌더링으로 대체
             
             // 전기 체인 공격 트리거
             triggerElectricChain: (hitEnemy, skillLevel = 1) => {
@@ -1060,6 +1102,55 @@ class GameScene extends Phaser.Scene {
                 // 영구적 스킬로 변경 - 종료 타이머 제거
                 
                 this.showAutoSkillText(`천둥번개 Lv.${skillLevel} 활성화!`);
+                return true;
+            },
+
+            // 전기장판 활성화
+            activateElectricField: (skillLevel = 1) => {
+                // 기존 타이머들 정리
+                if (this.electricSkillSystem.activeElectricField) {
+                    this.electricSkillSystem.activeElectricField.destroy();
+                    this.electricSkillSystem.activeElectricField = null;
+                }
+                // 기존 시각적 링 제거 (단순화)
+                if (this.electricSkillSystem.electricFieldRing) {
+                    this.electricSkillSystem.electricFieldRing.destroy();
+                    this.electricSkillSystem.electricFieldRing = null;
+                }
+                if (this.electricSkillSystem.ringUpdateEvent) {
+                    this.electricSkillSystem.ringUpdateEvent.destroy();
+                    this.electricSkillSystem.ringUpdateEvent = null;
+                }
+
+                // 레벨 설정
+                this.electricSkillSystem.electricFieldLevel = skillLevel;
+                
+                // 전기장판 설정 (60% 크기로 축소)
+                const config = {
+                    level: skillLevel,
+                    baseRadius: 90, // 기본 반지름 (150 * 0.6 = 90)
+                    radiusIncrease: 30, // 레벨당 반지름 증가 (50 * 0.6 = 30)
+                    damageInterval: 1000, // 1초마다 데미지
+                    damage: 15 + (skillLevel * 5) // 기본 15 + 레벨당 5 데미지
+                };
+
+                // 지속적인 전기 링 생성
+                const radius = config.baseRadius + (config.level - 1) * config.radiusIncrease;
+                this.electricSkillSystem.electricFieldRing = this.createPersistentElectricRing(radius);
+
+                // 데미지 타이머 (1초마다)
+                this.electricSkillSystem.activeElectricField = this.time.addEvent({
+                    delay: config.damageInterval,
+                    callback: () => {
+                        if (this.player && this.player.active && !this.isSkillSelectionActive) {
+                            this.updateElectricField(config);
+                        }
+                    },
+                    loop: true
+                });
+
+                console.log(`전기장판 Lv.${skillLevel} 활성화됨!`);
+                this.showAutoSkillText(`전기장판 Lv.${skillLevel} 활성화!`);
                 return true;
             }
         };
@@ -1454,10 +1545,68 @@ class GameScene extends Phaser.Scene {
                 
                 this.applyDamage(enemy);
                 
+                // 번개 유도미사일 체인 공격 체크
+                if (this.scene.skillSystem.selectedSkills.has('lightning_guided_chain')) {
+                    const skillLevel = this.scene.skillSystem.skillStacks.get('lightning_guided_chain') || 1;
+                    if (Math.random() < 0.2) { // 20% 확률
+                        this.triggerLightningChain(enemy, skillLevel);
+                    }
+                }
+                
                 // 타임아웃 초기화 (타격시 시간 다시 연장)
                 this.wanderingTime = 0;
                 
                 this.handleBounce(enemy);
+            }
+
+            // 번개 체인 공격 트리거
+            triggerLightningChain(hitEnemy, skillLevel) {
+                const maxChains = skillLevel; // 레벨 1: 1회, 레벨 2: 2회 전이
+                const chainRange = 150; // 체인 범위
+                const chainDamage = Math.floor(this.damage * 0.8); // 미사일 데미지의 80%
+                
+                // 체인 가능한 다른 적들 찾기
+                const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
+                    if (!enemy.active || enemy === hitEnemy) return false;
+                    const distance = Phaser.Math.Distance.Between(
+                        hitEnemy.x, hitEnemy.y, enemy.x, enemy.y
+                    );
+                    return distance <= chainRange;
+                });
+                
+                if (nearbyEnemies.length === 0) return;
+                
+                // 체인 공격 실행
+                let currentTarget = hitEnemy;
+                let chainedEnemies = new Set([hitEnemy]);
+                
+                for (let i = 0; i < maxChains && nearbyEnemies.length > 0; i++) {
+                    // 아직 체인되지 않은 가장 가까운 적 찾기
+                    const validTargets = nearbyEnemies.filter(enemy => !chainedEnemies.has(enemy));
+                    if (validTargets.length === 0) break;
+                    
+                    const nextTarget = validTargets.reduce((closest, enemy) => {
+                        const dist1 = Phaser.Math.Distance.Between(currentTarget.x, currentTarget.y, enemy.x, enemy.y);
+                        const dist2 = Phaser.Math.Distance.Between(currentTarget.x, currentTarget.y, closest.x, closest.y);
+                        return dist1 < dist2 ? enemy : closest;
+                    });
+                    
+                    // 번개 체인 시각 효과
+                    this.scene.createLightningBolt(currentTarget.x, currentTarget.y, nextTarget.x, nextTarget.y);
+                    
+                    // 데미지 적용 (기존 패턴 사용)
+                    nextTarget.health -= chainDamage;
+                    this.scene.createDamageText(nextTarget.x, nextTarget.y - 20, chainDamage, false, 0x00ffff);
+                    
+                    // 전기 타격 효과
+                    this.scene.createElectricHitEffect(nextTarget.x, nextTarget.y);
+                    
+                    chainedEnemies.add(nextTarget);
+                    currentTarget = nextTarget;
+                }
+                
+                // 체인 공격 알림
+                this.scene.showAutoSkillText(`번개 체인 x${chainedEnemies.size - 1}!`, 0x00ffff);
             }
             
             applyDamage(enemy) {
@@ -4448,6 +4597,16 @@ class GameScene extends Phaser.Scene {
             return false;
         }
         
+        // 조건부 스킬 확인 (conditions 배열에 있는 스킬들을 보유해야 함)
+        if (skill.conditions && skill.conditions.length > 0) {
+            const hasAllConditions = skill.conditions.every(conditionSkill => 
+                this.skillSystem.selectedSkills.has(conditionSkill)
+            );
+            if (!hasAllConditions) {
+                return false;
+            }
+        }
+        
         // 일회성 스킬 (stackable: false)인 경우 한 번만 선택 가능
         if (!skill.stackable) {
             return !this.skillSystem.selectedSkills.has(skill.id);
@@ -4728,6 +4887,13 @@ class GameScene extends Phaser.Scene {
                 const skillLevel = this.skillSystem.skillStacks.get(skill.id) || 1;
                 this.electricSkillSystem.activateRandomLightning(skillLevel, effect.duration);
             }
+        } else if (buffId === 'electric_field_zone') {
+            this.player.setTint(0x00ffff);
+            // 전기장판 스킬 활성화
+            if (this.electricSkillSystem && effect.action === 'activate_electric_field') {
+                const skillLevel = this.skillSystem.skillStacks.get(skill.id) || 1;
+                this.electricSkillSystem.activateElectricField(skillLevel);
+            }
         }
         
         // 만료 타이머 설정
@@ -4760,6 +4926,29 @@ class GameScene extends Phaser.Scene {
             this.electricSkillSystem.activeRandomLightning.destroy();
             this.electricSkillSystem.activeRandomLightning = null;
             console.log('랜덤 번개 타이머 정리됨');
+        }
+        
+        // 전기장판 버프 종료 시 타이머 정리
+        if (buffId === 'electric_field_zone' && this.electricSkillSystem) {
+            if (this.electricSkillSystem.activeElectricField) {
+                this.electricSkillSystem.activeElectricField.destroy();
+                this.electricSkillSystem.activeElectricField = null;
+            }
+            if (this.electricSkillSystem.electricFieldVisual) {
+                this.electricSkillSystem.electricFieldVisual.destroy();
+                this.electricSkillSystem.electricFieldVisual = null;
+            }
+            if (this.electricSkillSystem.electricFieldRing) {
+                // Container 객체 직접 파괴 (최적화된 시스템)
+                this.electricSkillSystem.electricFieldRing.destroy();
+                this.electricSkillSystem.electricFieldRing = null;
+            }
+            if (this.electricSkillSystem.ringUpdateEvent) {
+                this.electricSkillSystem.ringUpdateEvent.destroy();
+                this.electricSkillSystem.ringUpdateEvent = null;
+            }
+            this.electricSkillSystem.electricFieldLevel = 0;
+            console.log('전기장판 타이머들 정리됨');
         }
         
         this.skillSystem.activeBuffs.delete(buffId);
@@ -5019,6 +5208,14 @@ class GameScene extends Phaser.Scene {
         if (skill.effect.action === 'activate_guided_missile' || skill.effect.action === 'enhance_missile_bounce') {
             this.updateMissileStacks();
             console.log(`미사일 스킬 활성화: ${skill.name}`);
+            return;
+        }
+        
+        // 번개 유도미사일 스킬 처리
+        if (skill.effect.action === 'activate_lightning_guided_chain') {
+            const skillLevel = this.skillSystem.skillStacks.get(skill.id) || 1;
+            console.log(`번개 유도미사일 스킬 활성화: ${skill.name} Lv.${skillLevel}`);
+            this.showAutoSkillText(`번개 유도미사일 Lv.${skillLevel} 활성화!`);
             return;
         }
         
@@ -5742,6 +5939,163 @@ class GameScene extends Phaser.Scene {
         });
     }
     
+    // 전기장판 업데이트 (데미지만 처리, 시각 효과는 별도 타이머)
+    updateElectricField(config) {
+        if (!this.player || !this.player.active) return;
+
+        const radius = config.baseRadius + (config.level - 1) * config.radiusIncrease;
+        const playerX = this.player.x;
+        const playerY = this.player.y;
+
+        // 범위 내 적들에게 데미지
+        this.enemies.children.entries.forEach(enemy => {
+            if (!enemy.active) return;
+
+            const distance = Phaser.Math.Distance.Between(playerX, playerY, enemy.x, enemy.y);
+            if (distance <= radius) {
+                // 전기 데미지 적용 (기존 패턴 사용)
+                enemy.health -= config.damage;
+                
+                // 전기 타격 효과
+                this.createElectricHitEffect(enemy.x, enemy.y);
+                
+                // 데미지 텍스트 표시 (전기 색상)
+                this.createDamageText(enemy.x, enemy.y - 20, config.damage, false, 0x00ffff);
+            }
+        });
+    }
+
+    // 극도 최적화 번개 링 (GPU 가속 + 정적 렌더링)
+    createPersistentElectricRing(radius) {
+        // 정적 번개링 생성 (한 번만)
+        const staticRing = this.add.graphics();
+        staticRing.lineStyle(2, 0x87CEEB, 0.8);
+        staticRing.strokeCircle(0, 0, radius);
+        
+        // 동적 글로우 효과
+        const glowRing = this.add.graphics();
+        glowRing.lineStyle(6, 0x4A90E2, 0.2);
+        glowRing.strokeCircle(0, 0, radius * 1.1);
+        
+        // 컨테이너로 그룹화 (GPU 최적화)
+        const ringContainer = this.add.container(this.player.x, this.player.y);
+        ringContainer.add([glowRing, staticRing]);
+        
+        // 매우 가벼운 효과들
+        let time = 0;
+        
+        const updateRing = () => {
+            if (!this.player || !this.player.active || !this.electricSkillSystem.electricFieldRing) {
+                return;
+            }
+            
+            // 플레이어 위치만 업데이트
+            ringContainer.x = this.player.x;
+            ringContainer.y = this.player.y;
+            
+            // 초경량 효과: 단순 투명도 변화
+            time += 0.1;
+            const alpha = 0.7 + Math.sin(time) * 0.2;
+            staticRing.alpha = alpha;
+            glowRing.alpha = alpha * 0.3;
+            
+            // 미세한 크기 변화 (번개 펄스)
+            const scale = 1.0 + Math.sin(time * 1.5) * 0.03;
+            ringContainer.setScale(scale);
+        };
+        
+        // 고성능 업데이트 (부드러운 60fps)
+        this.electricSkillSystem.ringUpdateEvent = this.time.addEvent({
+            delay: 16, // 60fps - 매우 가벼운 연산만
+            callback: updateRing,
+            loop: true
+        });
+        
+        return ringContainer;
+    }
+
+    // *** 기존 복잡한 패턴 시스템 제거됨 - 성능 최적화 ***
+    // 단순한 원형 + 투명도/크기 변화로 대체
+
+    // 전기장판 링 이펙트 생성 (일회성, 데미지 시 사용)
+    createElectricFieldRing(centerX, centerY, radius) {
+        const ring = this.add.graphics();
+        
+        // 링의 번개 효과 생성 (8방향)
+        const segments = 24; // 링을 24개 세그먼트로 나눔
+        for (let i = 0; i < segments; i++) {
+            const angle = (i / segments) * Math.PI * 2;
+            const nextAngle = ((i + 1) / segments) * Math.PI * 2;
+            
+            // 각 세그먼트의 시작점과 끝점
+            const startX = centerX + Math.cos(angle) * radius;
+            const startY = centerY + Math.sin(angle) * radius;
+            const endX = centerX + Math.cos(nextAngle) * radius;
+            const endY = centerY + Math.sin(nextAngle) * radius;
+            
+            // 지그재그 번개 효과로 세그먼트 연결
+            this.createZigzagLightning(ring, startX, startY, endX, endY, 3);
+        }
+        
+        // 링 애니메이션 (깜빡이며 사라짐)
+        this.tweens.add({
+            targets: ring,
+            alpha: { from: 0.8, to: 0 },
+            duration: 250, // 더 빠르게 사라짐 (0.25초)
+            ease: 'Power2',
+            onComplete: () => ring.destroy()
+        });
+    }
+
+
+    // 지그재그 번개 생성 (링용 단순화) - 기존 호환성 유지
+    createZigzagLightning(graphics, startX, startY, endX, endY, zigzagCount) {
+        graphics.beginPath();
+        graphics.moveTo(startX, startY);
+        
+        for (let i = 1; i <= zigzagCount; i++) {
+            const progress = i / (zigzagCount + 1);
+            const midX = startX + (endX - startX) * progress;
+            const midY = startY + (endY - startY) * progress;
+            
+            // 지그재그 오프셋
+            const offset = (Math.random() - 0.5) * 20;
+            const perpX = -(endY - startY) / Math.sqrt((endX - startX) ** 2 + (endY - startY) ** 2) * offset;
+            const perpY = (endX - startX) / Math.sqrt((endX - startX) ** 2 + (endY - startY) ** 2) * offset;
+            
+            graphics.lineTo(midX + perpX, midY + perpY);
+        }
+        
+        graphics.lineTo(endX, endY);
+        graphics.strokePath();
+    }
+
+    // 전기 타격 효과
+    createElectricHitEffect(x, y) {
+        const effect = this.add.graphics();
+        effect.lineStyle(3, 0x00ffff, 1);
+        
+        // 작은 전기 스파크 (6방향)
+        for (let i = 0; i < 6; i++) {
+            const angle = (i / 6) * Math.PI * 2;
+            const length = 15 + Math.random() * 10;
+            const endX = x + Math.cos(angle) * length;
+            const endY = y + Math.sin(angle) * length;
+            
+            effect.moveTo(x, y);
+            effect.lineTo(endX, endY);
+        }
+        effect.strokePath();
+        
+        // 효과 사라지기
+        this.tweens.add({
+            targets: effect,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => effect.destroy()
+        });
+    }
+
     // 랜덤 번개 내리치기
     createRandomLightningStrike(config) {
         const playerX = this.player.x;
