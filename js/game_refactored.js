@@ -1,657 +1,7 @@
-// 능력치 수정자 엔진
-class StatModifierEngine {
-    constructor(gameScene) {
-        this.game = gameScene;
-        this.baseStats = {};
-        this.modifiers = new Map();
-        this.captureBaseStats();
-    }
-    
-    captureBaseStats() {
-        this.baseStats = {
-            playerSpeed: this.game.playerSpeed,
-            playerAcceleration: this.game.playerAcceleration,
-            playerDrag: this.game.playerDrag,
-            fireRate: this.game.fireRate,
-            bulletSpeed: this.game.bulletSpeed,
-            bulletCount: this.game.bulletCount,
-            fireRange: this.game.fireRange,
-            playerHealth: this.game.playerHealth,
-            maxPlayerHealth: this.game.maxPlayerHealth,
-            dashCooldown: this.game.dashCooldown,
-            lightningWaveCooldown: this.game.lightningWaveCooldown,
-            lightningWaveRadius: this.game.lightningWaveRadius,
-            bulletDamage: this.game.bulletDamage,
-            bulletPierce: this.game.bulletPierce,
-            bulletKnockback: this.game.bulletKnockback,
-            bulletAccuracy: this.game.bulletAccuracy,
-            bulletSize: this.game.bulletSize,
-            explosionRadiusMultiplier: this.game.explosionRadiusMultiplier
-        };
-    }
-    
-    addModifier(statName, modifierId, operation, value) {
-        if (!this.modifiers.has(statName)) {
-            this.modifiers.set(statName, new Map());
-        }
-        
-        this.modifiers.get(statName).set(modifierId, { operation, value });
-        this.recalculateStat(statName);
-    }
-    
-    removeModifier(statName, modifierId) {
-        if (this.modifiers.has(statName)) {
-            this.modifiers.get(statName).delete(modifierId);
-            this.recalculateStat(statName);
-        }
-    }
-    
-    recalculateStat(statName) {
-        let finalValue = this.baseStats[statName];
-        const statModifiers = this.modifiers.get(statName);
-        
-        if (statModifiers) {
-            // 먼저 덧셈 수정자 적용
-            for (let [id, modifier] of statModifiers) {
-                if (modifier.operation === 'add') {
-                    finalValue += modifier.value;
-                }
-            }
-            
-            // 그 다음 곱셈 수정자 적용
-            for (let [id, modifier] of statModifiers) {
-                if (modifier.operation === 'multiply') {
-                    finalValue *= modifier.value;
-                }
-            }
-        }
-        
-        // 게임 객체에 적용 (최소값 보장)
-        // bulletPierce는 0이 유효한 값이므로 예외 처리
-        if (statName === 'bulletPierce') {
-            this.game[statName] = Math.max(0, finalValue);
-        } else {
-            this.game[statName] = Math.max(1, finalValue);
-        }
-        
-        // 물리 엔진에도 적용 (필요한 경우)
-        this.applyToPhysicsEngine(statName, finalValue);
-    }
-    
-    applyToPhysicsEngine(statName, value) {
-        if (!this.game.player) return;
-        
-        switch(statName) {
-            case 'playerSpeed':
-                this.game.player.setMaxVelocity(value);
-                break;
-            case 'playerDrag':
-                this.game.player.setDrag(value);
-                break;
-        }
-    }
-}
+// SkillDefinitions는 이제 별도 모듈에서 로드됩니다
 
-// 스킬 정의 객체
-const skillDefinitions = {
-    // === Active 스킬들 (50%) ===
-    
-    instant_barrier: {
-        id: 'instant_barrier',
-        name: '방어 배리어',
-        description: '공격을 1회 막아주는 배리어 생성 (최대 3회 중첩)',
-        category: 'active',
-        rarity: 'common',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.12,
-        effect: {
-            type: 'instant',
-            action: 'add_barrier_charge',
-            value: 1
-        }
-    },
-    
-    instant_heal: {
-        id: 'instant_heal',
-        name: '응급 치료',
-        description: '체력을 1 회복합니다',
-        category: 'active',
-        rarity: 'common',
-        stackable: false,
-        probability: 0.10,
-        effect: {
-            type: 'instant',
-            action: 'heal_player',
-            value: 1
-        }
-    },
-    
-    agility_buff: {
-        id: 'agility_buff',
-        name: '민첩성 강화',
-        description: '30초동안 조작감이 매우 민첩해집니다',
-        category: 'active',
-        rarity: 'uncommon',
-        stackable: false,
-        probability: 0.08,
-        effect: {
-            type: 'timed_buff',
-            buffId: 'agility_boost',
-            duration: 30000,
-            modifiers: [
-                { target: 'playerDrag', operation: 'multiply', value: 1.67 },
-                { target: 'playerAcceleration', operation: 'multiply', value: 1.5 }
-            ]
-        }
-    },
-    
-    speed_buff: {
-        id: 'speed_buff',
-        name: '질주',
-        description: '30초동안 이동속도가 50% 증가합니다',
-        category: 'active',
-        rarity: 'uncommon',
-        stackable: false,
-        probability: 0.08,
-        effect: {
-            type: 'timed_buff',
-            buffId: 'speed_boost',
-            duration: 30000,
-            modifiers: [
-                { target: 'playerSpeed', operation: 'multiply', value: 1.5 }
-            ]
-        }
-    },
-    
-    collect_all_energy: {
-        id: 'collect_all_energy',
-        name: '에너지 수확',
-        description: '맵에 있는 모든 에너지구슬을 즉시 수집합니다',
-        category: 'active',
-        rarity: 'uncommon',
-        stackable: false,
-        probability: 0.06,
-        effect: {
-            type: 'instant',
-            action: 'collect_all_energy',
-            value: 0
-        }
-    },
-    
-    auto_shockwave_buff: {
-        id: 'auto_shockwave_buff',
-        name: '자동 파동파',
-        description: '30초동안 3초마다 자동으로 파동파를 발동합니다',
-        category: 'active',
-        rarity: 'rare',
-        stackable: false,
-        probability: 0.04,
-        effect: {
-            type: 'timed_buff',
-            buffId: 'auto_shockwave',
-            duration: 30000,
-            modifiers: []
-        }
-    },
-    
-    // === Passive 스킬들 (35%) ===
-    
-    bullet_count_increase: {
-        id: 'bullet_count_increase',
-        name: '다중 사격',
-        description: '총알이 +1개 추가됩니다 (최대 8개)',
-        category: 'passive',
-        rarity: 'common',
-        stackable: true,
-        maxStacks: 7,
-        probability: 0.10,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletCount',
-            operation: 'add',
-            value: 1
-        }
-    },
-    
-    fire_rate_up: {
-        id: 'fire_rate_up',
-        name: '속사',
-        description: '발사 속도가 25% 빨라집니다 (최대 5회)',
-        category: 'passive',
-        rarity: 'common',
-        stackable: true,
-        maxStacks: 5,
-        probability: 0.08,
-        effect: {
-            type: 'stat_modifier',
-            target: 'fireRate',
-            operation: 'multiply',
-            value: 0.8
-        }
-    },
-    
-    max_speed_increase: {
-        id: 'max_speed_increase',
-        name: '신속',
-        description: '최대 이동속도가 25% 증가합니다 (최대 3회)',
-        category: 'passive',
-        rarity: 'common',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.06,
-        effect: {
-            type: 'stat_modifier',
-            target: 'playerSpeed',
-            operation: 'multiply',
-            value: 1.25
-        }
-    },
-    
-    fire_range_increase: {
-        id: 'fire_range_increase',
-        name: '장거리 사격',
-        description: '사격 범위가 30% 증가합니다 (최대 3회)',
-        category: 'passive',
-        rarity: 'common',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.06,
-        effect: {
-            type: 'stat_modifier',
-            target: 'fireRange',
-            operation: 'multiply',
-            value: 1.3
-        }
-    },
-    
-    responsive_control: {
-        id: 'responsive_control',
-        name: '반응성 향상',
-        description: '플레이어 컨트롤이 더욱 즉각적으로 변합니다',
-        category: 'passive',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 2,
-        probability: 0.05,
-        effect: {
-            type: 'stat_modifier',
-            target: 'playerAcceleration',
-            operation: 'multiply',
-            value: 1.4
-        }
-    },
-    
-    // === Skill 스킬들 (15%) ===
-    
-    dash_knockback: {
-        id: 'dash_knockback',
-        name: '돌진',
-        description: '대쉬 경로의 적들에게 강한 넉백을 줍니다',
-        category: 'skill',
-        rarity: 'common',
-        stackable: false,
-        probability: 0.05,
-        effect: {
-            type: 'special_behavior',
-            behavior: 'dash_knockback'
-        }
-    },
-    
-    dash_attack: {
-        id: 'dash_attack',
-        name: '돌격',
-        description: '대쉬 경로의 적들을 강하게 공격합니다',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: false,
-        probability: 0.03,
-        effect: {
-            type: 'special_behavior',
-            behavior: 'dash_damage'
-        }
-    },
-    
-    dash_explosion: {
-        id: 'dash_explosion',
-        name: '착지 폭발',
-        description: '대쉬 끝에 큰 폭발 공격을 가합니다',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: false,
-        probability: 0.03,
-        effect: {
-            type: 'special_behavior',
-            behavior: 'dash_explosion'
-        }
-    },
-    
-    dash_lightning: {
-        id: 'dash_lightning',
-        name: '번개 대쉬',
-        description: '대쉬 경로의 적들을 감전시킵니다',
-        category: 'skill',
-        rarity: 'uncommon',
-        stackable: false,
-        probability: 0.04,
-        effect: {
-            type: 'special_behavior',
-            behavior: 'dash_electrify'
-        }
-    },
-    
-    dash_efficiency: {
-        id: 'dash_efficiency',
-        name: '순간이동 숙련',
-        description: '대쉬 쿨타임이 20% 단축됩니다 (최대 3회)',
-        category: 'skill',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.05,
-        effect: {
-            type: 'stat_modifier',
-            target: 'dashCooldown',
-            operation: 'multiply',
-            value: 0.8
-        }
-    },
-    
-    shockwave_range_increase: {
-        id: 'shockwave_range_increase',
-        name: '거대 파동',
-        description: '파동파의 범위가 25% 증가합니다 (최대 2회)',
-        category: 'skill',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 2,
-        probability: 0.04,
-        effect: {
-            type: 'stat_modifier',
-            target: 'lightningWaveRadius',
-            operation: 'multiply',
-            value: 1.25
-        }
-    },
-    
-    lightning_wave_cooldown: {
-        id: 'lightning_wave_cooldown',
-        name: '파동파 숙련',
-        description: '파동파 쿨타임이 20% 단축됩니다 (최대 3회)',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.03,
-        effect: {
-            type: 'stat_modifier',
-            target: 'lightningWaveCooldown',
-            operation: 'multiply',
-            value: 0.8
-        }
-    },
-    
-    double_shockwave: {
-        id: 'double_shockwave',
-        name: '이중 충격',
-        description: '파동파가 2연속으로 발동됩니다 (첫번째 → 1초 후 1.3배 크기)',
-        category: 'skill',
-        rarity: 'legendary',
-        stackable: false,
-        probability: 0.02,
-        effect: {
-            type: 'special_behavior',
-            behavior: 'double_shockwave'
-        }
-    },
-    
-    // === 미사일 스킬들 (새로 추가) ===
-    
-    guided_missile: {
-        id: 'guided_missile',
-        name: '유도 미사일',
-        description: '3초에 한번씩 적을향해 유도하는 미사일을 발사합니다 (최대 10회)',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: true,
-        maxStacks: 10,
-        probability: 0.04,
-        effect: {
-            type: 'special_behavior',
-            action: 'activate_guided_missile',
-            value: 1
-        }
-    },
-    
-    
-    // === 전기 스킬들 (새로 추가) ===
-    
-    electric_chain: {
-        id: 'electric_chain',
-        name: '전기 체인',
-        description: '50% 확률로 피격된 적 주변 다른 적에 전기 체인 공격을 1회 전이합니다 (최대3회 전이)',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.04,
-        effect: {
-            type: 'special_behavior',
-            action: 'electric_chain_attack',
-            value: 1
-        }
-    },
-    
-    random_lightning: {
-        id: 'random_lightning',
-        name: '천둥번개',
-        description: '랜덤한 위치에 번개가 내려칩니다. 중첩될때마다 더 자주, 더 많이 발생합니다 (최대 3회)',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.03,
-        effect: {
-            type: 'timed_buff',
-            buffId: 'random_lightning_storm',
-            duration: 999999999, // 거의 영구적 (게임오버까지 지속)
-            action: 'activate_random_lightning',
-            value: 1,
-            modifiers: []
-        }
-    },
-
-    electric_field: {
-        id: 'electric_field',
-        name: '전기장판',
-        description: '플레이어 주위에 전기장판을 둡니다. 장판은 주기적으로 적에게 데미지를 입히며, 중첩될때마다 장판의 크기가 더 커집니다 (최대 3회)',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.04,
-        effect: {
-            type: 'timed_buff',
-            buffId: 'electric_field_zone',
-            duration: 999999999, // 거의 영구적 (게임오버까지 지속)
-            action: 'activate_electric_field',
-            value: 1,
-            modifiers: []
-        }
-    },
-
-    lightning_guided_chain: {
-        id: 'lightning_guided_chain',
-        name: '번개 유도미사일',
-        description: '유도미사일 활성화시에만 등장합니다. 20% 확률로, 유도미사일이 가격한 적 주변 다른적에게 전기 체인 공격을 1회 전이합니다 (중첩했을때, 최대 2회 까지 전이됩니다)',
-        category: 'skill',
-        rarity: 'rare',
-        stackable: true,
-        maxStacks: 2,
-        probability: 0.05,
-        conditions: ['guided_missile'], // 유도미사일 스킬이 있을 때만 등장
-        effect: {
-            type: 'special_behavior',
-            action: 'activate_lightning_guided_chain',
-            value: 1
-        }
-    },
-    
-    // === 새로운 총알 스킬들 ===
-    
-    piercing_bullets: {
-        id: 'piercing_bullets',
-        name: '관통 총알',
-        description: '총알이 적을 +1회 뚫습니다 (최대 3회)',
-        category: 'passive',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.08,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletPierce',
-            operation: 'add',
-            value: 1
-        }
-    },
-    
-    damage_speed_tradeoff: {
-        id: 'damage_speed_tradeoff',
-        name: '강력한 총알',
-        description: '총알 공격력이 높아지지만, 총알 발사속도는 약간 줄어듭니다 (최대 3회)',
-        category: 'passive',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.08,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletDamage',
-            operation: 'multiply',
-            value: 1.5,
-            secondaryEffect: {
-                target: 'fireRate',
-                operation: 'multiply',
-                value: 1.2 // 발사속도 20% 증가 (더 느려짐)
-            }
-        }
-    },
-    
-    double_shot: {
-        id: 'double_shot',
-        name: '연속 사격',
-        description: '총알을 발사할때, 연속으로 한번 더 발사합니다. 하지만 총알의 피해가 40% 줄어듭니다',
-        category: 'passive',
-        rarity: 'rare',
-        stackable: false,
-        probability: 0.05,
-        effect: {
-            type: 'special_behavior',
-            action: 'enable_double_shot',
-            value: 1
-        }
-    },
-    
-    enhanced_knockback: {
-        id: 'enhanced_knockback',
-        name: '강화된 넉백',
-        description: '총알의 넉백이 강화됩니다',
-        category: 'passive',
-        rarity: 'common',
-        stackable: false,
-        probability: 0.07,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletKnockback',
-            operation: 'multiply',
-            value: 2.0
-        }
-    },
-    
-    improved_accuracy: {
-        id: 'improved_accuracy',
-        name: '정확도 향상',
-        description: '총알의 정확도가 더 높아집니다',
-        category: 'passive',
-        rarity: 'common',
-        stackable: false,
-        probability: 0.06,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletAccuracy',
-            operation: 'multiply',
-            value: 1.5
-        }
-    },
-    
-    larger_bullets: {
-        id: 'larger_bullets',
-        name: '대형 총알',
-        description: '총알의 크기가 더 커집니다',
-        category: 'passive',
-        rarity: 'common',
-        stackable: false,
-        probability: 0.06,
-        effect: {
-            type: 'stat_modifier',
-            target: 'bulletSize',
-            operation: 'multiply',
-            value: 2.5 // 2.0 → 2.5로 더 크게 증가
-        }
-    },
-    
-    explosive_bullets: {
-        id: 'explosive_bullets',
-        name: '폭발 총알',
-        description: '총알이 대폭발하며, 주위 반경 적에게 강력한 범위 공격을 가합니다. 범위안에 있는 적은 총알의 60% 데미지를 입습니다',
-        category: 'passive',
-        rarity: 'rare',
-        stackable: false,
-        probability: 0.04,
-        effect: {
-            type: 'special_behavior',
-            action: 'enable_explosive_bullets',
-            value: 1
-        }
-    },
-    
-    // === 폭발 총알 조건부 스킬들 ===
-    
-    enhanced_explosion_radius: {
-        id: 'enhanced_explosion_radius',
-        name: '확장된 폭발',
-        description: '총알의 폭발 반경이 더 커집니다. 폭발 반경 내 적들에게 기본 공격력의 50% 데미지를 입힙니다 (최대 3회)',
-        category: 'passive',
-        rarity: 'uncommon',
-        stackable: true,
-        maxStacks: 3,
-        probability: 0.07,
-        prerequisite: 'explosive_bullets', // 폭발 총알 스킬 필요
-        effect: {
-            type: 'stat_modifier',
-            target: 'explosionRadiusMultiplier',
-            operation: 'add',
-            value: 0.3 // 30% 반경 증가
-        }
-    },
-    
-    shrapnel_explosion: {
-        id: 'shrapnel_explosion',
-        name: '파편 폭발',
-        description: '총알이 폭발하면, 주위에 3개의 작은 파편으로 나뉘어 잠시 시간 후에 작은 크기로 폭발합니다',
-        category: 'passive',
-        rarity: 'rare',
-        stackable: false,
-        probability: 0.05,
-        prerequisite: 'explosive_bullets', // 폭발 총알 스킬 필요
-        effect: {
-            type: 'special_behavior',
-            action: 'enable_shrapnel_explosion',
-            value: 1
-        }
-    }
-};
+// 배리어 시각화 시스템 임포트
+import { BarrierVisualizationSystem } from './systems/BarrierVisualizationSystem.js';
 
 class TitleScene extends Phaser.Scene {
     constructor() {
@@ -809,6 +159,7 @@ class GameScene extends Phaser.Scene {
         this.explosions = null;
         this.cursors = null;
         this.wasd = null;
+        this.barrierVisualizationSystem = null;
         
         // 게임 상태 변수들
         this.lastFired = 0;
@@ -822,7 +173,6 @@ class GameScene extends Phaser.Scene {
         
         // 새로운 총알 속성들
         this.bulletDamage = 1.0; // 기본 총알 데미지 (0.5 → 1.0으로 증가)
-        this.bulletPierce = 0; // 관통 횟수
         this.bulletKnockback = 200; // 기본 넉백 강도
         this.bulletAccuracy = 1.0; // 정확도 (1.0 = 완벽한 정확도)
         this.bulletSize = 1.0; // 총알 크기 배율
@@ -1043,6 +393,9 @@ class GameScene extends Phaser.Scene {
         
         // ⚡ 새로운 전기 시스템들 초기화
         this.chainLightningSystem = new ChainLightningSystem(this);
+        this.electricFieldSystem = new ElectricFieldSystem(this);
+        
+        // 🛡️ 배리어 시각화 시스템 초기화 (플레이어 생성 후에 초기화됨)
         
         // 전기 스킬 시스템 (간단한 구현)
         this.electricSkillSystem = {
@@ -1164,6 +517,9 @@ class GameScene extends Phaser.Scene {
         this.player.setDrag(this.playerDrag);
         this.player.setMaxVelocity(this.playerSpeed);
         
+        // 🛡️ 배리어 시각화 시스템 초기화 (플레이어 생성 후)
+        this.barrierVisualizationSystem = new BarrierVisualizationSystem(this, this.player);
+        
         // 게임 오브젝트 그룹 생성
         this.enemies = this.physics.add.group();
         this.bullets = this.physics.add.group();
@@ -1204,6 +560,1462 @@ class GameScene extends Phaser.Scene {
         
         // 월드 경계 설정
         this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
+        
+        // 🛡️ 초기 배리어 상태 시각화 (게임 시작 시 배리어가 있다면)
+        if (this.barrierVisualizationSystem && this.skillSystem.barrierCharges > 0) {
+            this.barrierVisualizationSystem.updateBarriers(this.skillSystem.barrierCharges);
+        }
+    }
+    
+    // 게임 타이머들 설정
+    setupGameTimers() {
+        // 적 스폰 타이머
+        this.enemySpawnTimer = this.time.addEvent({
+            delay: this.enemySpawnRate,
+            callback: this.spawnEnemyWave,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 게임 시간 및 난이도 타이머
+        this.time.addEvent({
+            delay: 1000,
+            callback: this.updateGameTime,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 대쉬 쿨다운 업데이트 타이머
+        this.time.addEvent({
+            delay: 100,
+            callback: this.updateDashCooldowns,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 탄환 업그레이드 스폰 타이머
+        this.time.addEvent({
+            delay: this.bulletUpgradeSpawnRate,
+            callback: this.spawnBulletUpgrade,
+            callbackScope: this,
+            loop: true
+        });
+        
+        // 엘리트 몬스터 스폰 타이머
+        this.time.addEvent({
+            delay: this.eliteSpawnRate,
+            callback: this.trySpawnEliteMonster,
+            callbackScope: this,
+            loop: true
+        });
+    }
+    
+    // 충돌 감지 설정
+    setupCollisionDetection() {
+        this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
+        this.physics.add.overlap(this.player, this.energy, this.collectEnergy, null, this);
+        this.physics.add.overlap(this.player, this.bulletUpgrades, this.collectBulletUpgrade, null, this);
+        this.physics.add.overlap(this.player, this.enemies, this.playerHit, null, this);
+        this.physics.add.overlap(this.player, this.enemyBullets, this.playerHitByBullet, null, this);
+    }
+    
+    // 미사일 풀 생성 후 미사일 충돌 감지 설정
+    setupMissileCollisions() {
+        if (this.missilePool) {
+            this.physics.add.overlap(this.missilePool, this.enemies, this.missileHitEnemy, null, this);
+        } else {
+            console.warn('❌ 미사일 풀이 없어서 충돌 감지를 설정할 수 없습니다!');
+        }
+    }
+
+    // M키 미사일 발사 테스트 메서드
+    testMissileFire() {
+        
+        if (!this.missilePool) {
+            console.warn('❌ 미사일 풀이 없습니다!');
+            return;
+        }
+        
+        // 가장 가까운 적 찾기
+        let nearestEnemy = null;
+        let nearestDistance = Infinity;
+        
+        this.enemies.children.entries.forEach(enemy => {
+            if (enemy.active) {
+                const distance = Phaser.Math.Distance.Between(
+                    this.player.x, this.player.y, enemy.x, enemy.y
+                );
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestEnemy = enemy;
+                }
+            }
+        });
+        
+        if (nearestEnemy) {
+            
+            // 미사일 발사
+            const missile = this.missilePool.get(this.player.x, this.player.y);
+            if (missile) {
+                const success = missile.launch(nearestEnemy, 3); // 3번 바운스
+                if (success) {
+                } else {
+                    console.warn('❌ 미사일 발사 실패!');
+                }
+            } else {
+                console.warn('❌ 미사일 풀에서 객체를 가져올 수 없습니다!');
+            }
+        } else {
+            console.warn('❌ 주변에 적이 없습니다!');
+            
+            // 테스트용 더미 타겟 생성
+            const dummyEnemy = this.physics.add.sprite(
+                this.player.x + 200, this.player.y, 'enemy'
+            );
+            dummyEnemy.enemyType = 'test_dummy';
+            dummyEnemy.health = 10;
+            dummyEnemy.setTint(0xFF0000); // 빨간색으로 표시
+            this.enemies.add(dummyEnemy);
+            
+            // 더미 적에게 미사일 발사
+            const missile = this.missilePool.get(this.player.x, this.player.y);
+            if (missile) {
+                missile.launch(dummyEnemy, 3);
+            }
+        }
+    }
+
+    // 미사일 시스템 초기화
+    initializeMissileSystem() {
+        // 미사일 클래스 로드 (인라인 구현)
+        this.loadMissileClasses();
+        
+        // 미사일 풀 생성
+        this.missilePool = this.physics.add.group({
+            classType: this.GuidedMissile,
+            runChildUpdate: true,
+            maxSize: 100,
+            createCallback: (missile) => {
+                missile.setName('guidedMissile');
+            }
+        });
+        
+        // 미사일 스킬 매니저
+        this.missileSkillManager = new this.MissileSkillManager(this);
+        
+        // 충돌 감지 설정
+        this.physics.add.overlap(this.missilePool, this.enemies, (missile, enemy) => {
+            if (missile.active && enemy.active) {
+                missile.onHit(enemy);
+            }
+        });
+        
+    }
+    
+    // 미사일 클래스들 로드 (인라인 구현)
+    loadMissileClasses() {
+        // GuidedMissile 클래스 인라인 구현
+        this.GuidedMissile = class GuidedMissile extends Phaser.Physics.Arcade.Sprite {
+            constructor(scene, x, y) {
+                super(scene, x, y, 'energy');
+                
+                scene.add.existing(this);
+                scene.physics.add.existing(this);
+                this.body.setAllowGravity(false);
+                this.setActive(false).setVisible(false);
+                
+                // Navigation System
+                this.speedMin = 180;
+                this.speedMax = 420;
+                this.currentSpeed = 260;
+                this.turnRate = 8;
+                this.accelerationEasing = 0.15;
+                
+                // Wobble Effect
+                this.wobbleAmp = 45;
+                this.wobbleFreq = 8;
+                this.wobbleTime = 0;
+                
+                // Bounce System
+                this.bounceLeft = 3;
+                this.bounceRadius = 220;
+                this.hitCooldown = 0;
+                this.visitedTargets = new Set();
+                
+                // Lifecycle
+                this.maxLifetime = 6;
+                this.currentLifetime = 0;
+                this.damage = 3;
+                
+                // State
+                this.state = 'INACTIVE';
+                this.target = null;
+                
+                // Enhanced Impact System (강화된 타격감)
+                this.bounceBackForce = 2.5;    // 반대방향 튕김 강도 2.5배
+                this.bounceBackDistance = 120;  // 튕김 거리 2배 증가
+                this.targetOnly = true;        // 타겟만 타격 가능
+                
+                // Wandering System (배회 시스템)
+                this.wanderingTime = 0;        // 배회 시간 누적
+                this.wanderingTimeout = 4000;  // 4초 타임아웃
+                this.lemniscatePhase = 0;      // ∞ 궤적 위상
+                this.lemniscateScale = 250;     // ∞ 궤적 크기 (더 크고 역동적)
+                this.wanderingBaseX = 0;       // 배회 중심점
+                this.wanderingBaseY = 0;
+                
+                // Target Reacquisition (타겟 재포착)
+                this.targetingDelay = 0;       // 2초 딜레이 카운터
+                this.targetingDelayDuration = 500; // 0.5초 딜레이
+                this.hasFoundNewTarget = false; // 새 타겟 발견 플래그
+                
+                // Visual
+                this.trailPoints = [];
+                this.maxTrailPoints = 12;
+                
+                this.setupVisualEffects();
+            }
+            
+            setupVisualEffects() {
+                this.setTint(0x00AAFF);
+                this.setScale(0.8);
+                
+                this.glowEffect = this.scene.add.circle(this.x, this.y, 8, 0x87CEEB, 0.3);
+                this.glowEffect.setVisible(false);
+            }
+            
+            launch(target, bounceCount) {
+                if (!target || !target.active) return false;
+                
+                this.setActive(true).setVisible(true);
+                this.glowEffect.setVisible(true);
+                
+                this.target = target;
+                this.bounceLeft = bounceCount;
+                this.currentLifetime = 0;
+                this.wobbleTime = 0;
+                this.hitCooldown = 0;
+                this.visitedTargets.clear();
+                this.trailPoints = [];
+                this.state = 'LAUNCHING';
+                
+                // 배회 시스템 초기화
+                this.wanderingTime = 0;
+                this.targetingDelay = 0;
+                this.hasFoundNewTarget = false;
+                this.newTarget = null;
+                
+                const initialAngle = Phaser.Math.Angle.Between(this.x, this.y, target.x, target.y);
+                this.scene.physics.velocityFromRotation(initialAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = initialAngle;
+                
+                this.scene.time.delayedCall(200, () => {
+                    if (this.active) {
+                        this.state = 'SEEKING';
+                    }
+                });
+                
+                return true;
+            }
+            
+            preUpdate(time, delta) {
+                super.preUpdate(time, delta);
+                
+                if (!this.active) return;
+                
+                const dt = delta / 1000;
+                this.currentLifetime += dt;
+                this.wobbleTime += dt;
+                this.hitCooldown = Math.max(0, this.hitCooldown - delta);
+                
+                // 수명 체크
+                if (this.currentLifetime > this.maxLifetime) {
+                    return this.destroyMissile();
+                }
+                
+                // 타겟 유효성 체크 (배회 모드가 아닌 경우에만)
+                if (this.state !== 'WANDERING' && (!this.target || !this.target.active)) {
+                    this.enterWanderingMode();
+                    return;
+                }
+                
+                switch (this.state) {
+                    case 'LAUNCHING':
+                        this.updateLaunching(dt);
+                        break;
+                    case 'SEEKING':
+                        this.updateSeeking(dt);
+                        break;
+                    case 'WANDERING':
+                        this.updateWanderingMovement(delta);
+                        break;
+                    case 'BOUNCING':
+                        if (this.hitCooldown <= 0) {
+                            this.state = 'SEEKING';
+                        }
+                        break;
+                }
+                
+                this.updateVisualEffects();
+            }
+            
+            updateLaunching(dt) {
+                const targetAngle = Phaser.Math.Angle.Between(this.x, this.y, this.target.x, this.target.y);
+                this.scene.physics.velocityFromRotation(targetAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = targetAngle;
+            }
+            
+            updateSeeking(dt) {
+                const aimPoint = this.calculateWobbledAimPoint();
+                
+                const desiredAngle = Phaser.Math.Angle.Between(this.x, this.y, aimPoint.x, aimPoint.y);
+                const currentAngle = this.body.velocity.angle();
+                const nextAngle = Phaser.Math.Angle.RotateTo(currentAngle, desiredAngle, this.turnRate * dt);
+                
+                const alignment = Math.cos(Phaser.Math.Angle.Wrap(desiredAngle - nextAngle));
+                const targetSpeed = Phaser.Math.Linear(this.speedMin, this.speedMax, (alignment + 1) * 0.5);
+                this.currentSpeed = Phaser.Math.Linear(this.currentSpeed, targetSpeed, this.accelerationEasing);
+                
+                this.scene.physics.velocityFromRotation(nextAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = nextAngle;
+            }
+            
+            calculateWobbledAimPoint() {
+                const toTarget = new Phaser.Math.Vector2(this.target.x - this.x, this.target.y - this.y);
+                const perpendicular = new Phaser.Math.Vector2(-toTarget.y, toTarget.x);
+                if (perpendicular.length() > 0) {
+                    perpendicular.normalize();
+                }
+                
+                const wobbleOffset = Math.sin(this.wobbleTime * this.wobbleFreq) * this.wobbleAmp;
+                
+                return new Phaser.Math.Vector2(this.target.x, this.target.y)
+                    .add(perpendicular.scale(wobbleOffset));
+            }
+            
+            
+            onHit(enemy) {
+                if (!this.active || this.hitCooldown > 0 || this.state !== 'SEEKING') return;
+                
+                
+                // 타겟 전용 체크 비활성화 (미사일이 모든 적을 공격할 수 있도록)
+                
+                
+                // 일반공격과 동일한 타격 이팩트 발생 보장
+                this.createHitEffect(enemy.x, enemy.y);
+                
+                this.applyDamage(enemy);
+                
+                // 번개 유도미사일 체인 공격 체크
+                if (this.scene.skillSystem.selectedSkills.has('lightning_guided_chain')) {
+                    const skillLevel = this.scene.skillSystem.skillStacks.get('lightning_guided_chain') || 1;
+                    if (Math.random() < 0.2) { // 20% 확률
+                        this.triggerLightningChain(enemy, skillLevel);
+                    }
+                }
+                
+                // 타임아웃 초기화 (타격시 시간 다시 연장)
+                this.wanderingTime = 0;
+                
+                this.handleBounce(enemy);
+            }
+
+            // 번개 체인 공격 트리거 (플레이어 번개체인 시스템 활용)
+            triggerLightningChain(hitEnemy, skillLevel) {
+                // 플레이어 번개체인과 동일한 시스템 사용 (50% 데미지)
+                const playerChainDamage = 8 + (skillLevel * 2); // 플레이어 번개체인 데미지
+                const chainDamage = Math.floor(playerChainDamage * 0.5); // 50% 데미지
+                
+                const chainConfig = {
+                    maxJumps: skillLevel, // 레벨 1: 1회, 레벨 2: 2회 전이
+                    maxRange: 150, // 체인 범위 (플레이어와 동일)
+                    damage: chainDamage,
+                    damageDecay: 0.85, // 플레이어와 동일한 감쇠율
+                    duration: 120 // 시각 효과 지속시간
+                };
+                
+                // 플레이어의 번개체인 시스템 직접 활용
+                if (this.scene.electricSkillSystem && this.scene.electricSkillSystem.chainLightningSystem) {
+                    const success = this.scene.electricSkillSystem.chainLightningSystem.executeChainLightning(
+                        hitEnemy, hitEnemy.x, hitEnemy.y, chainConfig
+                    );
+                    
+                    if (success) {
+                        this.scene.showAutoSkillText(`번개 유도미사일 체인!`, 0x00ffff);
+                    }
+                } else {
+                    // 백업: 기존 로직 사용
+                    console.log('체인 라이트닝 시스템 없음, 기존 로직 사용');
+                    this.triggerLightningChainFallback(hitEnemy, skillLevel, chainDamage);
+                }
+            }
+            
+            // 백업용 번개체인 로직
+            triggerLightningChainFallback(hitEnemy, skillLevel, chainDamage) {
+                const maxChains = skillLevel;
+                const chainRange = 150;
+                
+                const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
+                    if (!enemy.active || enemy === hitEnemy) return false;
+                    const distance = Phaser.Math.Distance.Between(
+                        hitEnemy.x, hitEnemy.y, enemy.x, enemy.y
+                    );
+                    return distance <= chainRange;
+                });
+                
+                if (nearbyEnemies.length === 0) return;
+                
+                let currentTarget = hitEnemy;
+                let chainedEnemies = new Set([hitEnemy]);
+                
+                for (let i = 0; i < maxChains && nearbyEnemies.length > 0; i++) {
+                    const validTargets = nearbyEnemies.filter(enemy => !chainedEnemies.has(enemy));
+                    if (validTargets.length === 0) break;
+                    
+                    const nextTarget = validTargets.reduce((closest, enemy) => {
+                        const dist1 = Phaser.Math.Distance.Between(currentTarget.x, currentTarget.y, enemy.x, enemy.y);
+                        const dist2 = Phaser.Math.Distance.Between(currentTarget.x, currentTarget.y, closest.x, closest.y);
+                        return dist1 < dist2 ? enemy : closest;
+                    });
+                    
+                    this.scene.createLightningBolt(currentTarget.x, currentTarget.y, nextTarget.x, nextTarget.y);
+                    nextTarget.health -= chainDamage;
+                    this.scene.createDamageText(nextTarget.x, nextTarget.y - 20, chainDamage, false, 0x00ffff);
+                    this.scene.createElectricHitEffect(nextTarget.x, nextTarget.y);
+                    
+                    chainedEnemies.add(nextTarget);
+                    currentTarget = nextTarget;
+                }
+                
+                this.scene.showAutoSkillText(`번개 유도미사일 체인 x${chainedEnemies.size - 1}!`, 0x00ffff);
+            }
+            
+            applyDamage(enemy) {
+                const previousHealth = enemy.health;
+                enemy.health -= this.damage;
+                
+                
+                // 미사일 데미지 표시 (더 큰 사이즈, 미사일 색상)
+                if (this.scene.showDamageNumber) {
+                    this.scene.showDamageNumber(enemy.x, enemy.y - 35, this.damage, 0x00AAFF);
+                }
+                
+                // 추가 데미지 표시 (더 눈에 띄게)
+                const damageText = this.scene.add.text(enemy.x, enemy.y - 50, `-${this.damage}`, {
+                    fontSize: '18px',
+                    color: '#00AAFF',
+                    stroke: '#003366',
+                    strokeThickness: 3,
+                    shadow: { offsetX: 2, offsetY: 2, color: '#000000', fill: true }
+                }).setOrigin(0.5);
+                
+                this.scene.tweens.add({
+                    targets: damageText,
+                    y: enemy.y - 80,
+                    alpha: 0,
+                    scaleX: 1.2,
+                    scaleY: 1.2,
+                    duration: 1000,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => damageText.destroy()
+                });
+                
+                if (this.scene.applyElectrifyEffect) {
+                    this.scene.applyElectrifyEffect(enemy);
+                }
+                
+                if (enemy.health <= 0) {
+                    this.scene.createExplosion(enemy.x, enemy.y);
+                    
+                    const energyOrb = this.scene.physics.add.sprite(enemy.x, enemy.y, 'energy');
+                    this.scene.energy.add(energyOrb);
+                    
+                    const points = this.scene.getEnemyPoints ? this.scene.getEnemyPoints(enemy.enemyType) : 100;
+                    this.scene.score += points;
+                    
+                    enemy.destroy();
+                }
+            }
+            
+            handleBounce(hitEnemy) {
+                this.bounceLeft--;
+                this.visitedTargets.add(hitEnemy);
+                this.hitCooldown = 84; // 30% 빈도 증가 (120ms -> 84ms)
+                this.state = 'BOUNCING';
+                
+                // 강화된 타격감: 반대방향 튕김 효과
+                this.performEnhancedBounceBack(hitEnemy);
+                
+                if (this.bounceLeft < 0) {
+                    this.enterWanderingMode();
+                    return;
+                }
+                
+                const nextTarget = this.findBounceTarget(hitEnemy);
+                
+                if (nextTarget) {
+                    this.target = nextTarget;
+                    this.createBounceEffect(hitEnemy.x, hitEnemy.y, nextTarget.x, nextTarget.y);
+                    this.state = 'SEEKING';
+                } else {
+                    this.enterWanderingMode();
+                }
+            }
+            
+            findBounceTarget(excludeEnemy) {
+                const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
+                    if (!enemy.active || enemy === excludeEnemy) return false;
+                    
+                    const distance = Phaser.Math.Distance.Between(
+                        excludeEnemy.x, excludeEnemy.y, enemy.x, enemy.y
+                    );
+                    
+                    return distance <= this.bounceRadius;
+                });
+                
+                if (nearbyEnemies.length === 0) return null;
+                
+                const unvisited = nearbyEnemies.filter(e => !this.visitedTargets.has(e));
+                const candidates = unvisited.length > 0 ? unvisited : nearbyEnemies;
+                
+                let closestEnemy = candidates[0];
+                let closestDistance = Phaser.Math.Distance.Between(
+                    excludeEnemy.x, excludeEnemy.y, closestEnemy.x, closestEnemy.y
+                );
+                
+                for (let i = 1; i < candidates.length; i++) {
+                    const distance = Phaser.Math.Distance.Between(
+                        excludeEnemy.x, excludeEnemy.y, candidates[i].x, candidates[i].y
+                    );
+                    
+                    if (distance < closestDistance) {
+                        closestDistance = distance;
+                        closestEnemy = candidates[i];
+                    }
+                }
+                
+                return closestEnemy;
+            }
+            
+            updateVisualEffects() {
+                this.glowEffect.setPosition(this.x, this.y);
+                
+                this.trailPoints.push({
+                    x: this.x,
+                    y: this.y,
+                    timestamp: Date.now()
+                });
+                
+                const cutoffTime = Date.now() - 300;
+                this.trailPoints = this.trailPoints.filter(p => p.timestamp > cutoffTime);
+                
+                if (this.trailPoints.length > this.maxTrailPoints) {
+                    this.trailPoints.shift();
+                }
+                
+                this.renderTrail();
+            }
+            
+            renderTrail() {
+                if (this.trailPoints.length < 2) return;
+                
+                if (this.currentTrailGraphics) {
+                    this.currentTrailGraphics.destroy();
+                }
+                
+                this.currentTrailGraphics = this.scene.add.graphics();
+                
+                for (let i = 1; i < this.trailPoints.length; i++) {
+                    const alpha = i / this.trailPoints.length;
+                    const width = alpha * 3;
+                    
+                    this.currentTrailGraphics.lineStyle(width, 0x00AAFF, alpha * 0.8);
+                    this.currentTrailGraphics.beginPath();
+                    this.currentTrailGraphics.moveTo(this.trailPoints[i-1].x, this.trailPoints[i-1].y);
+                    this.currentTrailGraphics.lineTo(this.trailPoints[i].x, this.trailPoints[i].y);
+                    this.currentTrailGraphics.strokePath();
+                }
+                
+                this.scene.tweens.add({
+                    targets: this.currentTrailGraphics,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: () => {
+                        if (this.currentTrailGraphics) {
+                            this.currentTrailGraphics.destroy();
+                            this.currentTrailGraphics = null;
+                        }
+                    }
+                });
+            }
+            
+            createHitEffect(x, y) {
+                // 강화된 미사일 타격 이팩트
+                const explosion = this.scene.add.circle(x, y, 18, 0x00AAFF, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: explosion,
+                    scaleX: 3.2,
+                    scaleY: 3.2,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => explosion.destroy()
+                });
+                
+                // 추가 글로우 효과
+                const glow = this.scene.add.circle(x, y, 30, 0x87CEEB, 0.5);
+                
+                this.scene.tweens.add({
+                    targets: glow,
+                    scaleX: 2.0,
+                    scaleY: 2.0,
+                    alpha: 0,
+                    duration: 500,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => glow.destroy()
+                });
+                
+                this.createSparkParticles(x, y, 12);
+                
+                // 미니 반짝이 효과
+                this.createFlashEffect(x, y);
+            }
+            
+            // 일반공격과 동일한 타격 이팩트 (미사일 색상으로)
+            createBulletStyleHitEffect(x, y) {
+                // 메인 폭발 (미사일 색상 - 더 크고 강렬하게)
+                const explosion = this.scene.add.circle(x, y, 20, 0x00AAFF, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: explosion,
+                    scaleX: 3.5,
+                    scaleY: 3.5,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => explosion.destroy()
+                });
+                
+                // 외부 글로우 (더 크고 지속시간 증가)
+                const glow = this.scene.add.circle(x, y, 35, 0x87CEEB, 0.6);
+                
+                this.scene.tweens.add({
+                    targets: glow,
+                    scaleX: 2.5,
+                    scaleY: 2.5,
+                    alpha: 0,
+                    duration: 600,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => glow.destroy()
+                });
+                
+                // 샤크웨이브 (충격파)
+                const shockwave = this.scene.add.circle(x, y, 10, 0xFFFFFF, 0.8);
+                shockwave.setStrokeStyle(3, 0x00AAFF, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: shockwave,
+                    scaleX: 4,
+                    scaleY: 4,
+                    alpha: 0,
+                    duration: 500,
+                    ease: 'Power3.easeOut',
+                    onComplete: () => shockwave.destroy()
+                });
+                
+                // 미사일 색상 스파크 (더 많이)
+                this.createSparkParticles(x, y, 15);
+                
+                // 추가 반짝이 자극 효과
+                this.createFlashEffect(x, y);
+                
+                // 카메라 살짝 흔들기
+                if (this.scene.cameras && this.scene.cameras.main) {
+                    this.scene.cameras.main.shake(100, 0.008);
+                }
+            }
+            
+            createBounceEffect(fromX, fromY, toX, toY) {
+                // 유도미사일 노란색 트레일 효과 제거 (사용자 요청)
+                // 바운스 효과를 파란색으로 변경하여 yellow 제거
+                const spark = this.scene.add.circle(fromX, fromY, 8, 0x00AAFF, 0.8);
+                
+                this.scene.tweens.add({
+                    targets: spark,
+                    scaleX: 2,
+                    scaleY: 2,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: () => spark.destroy()
+                });
+                
+                const angle = Phaser.Math.Angle.Between(fromX, fromY, toX, toY);
+                this.createDirectionParticles(fromX, fromY, angle);
+            }
+            
+            createSparkParticles(x, y, count = 8) {
+                for (let i = 0; i < count; i++) {
+                    const particle = this.scene.add.circle(x, y, 3, 0x00AAFF, 0.9);
+                    
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 30 + Math.random() * 50;
+                    
+                    this.scene.tweens.add({
+                        targets: particle,
+                        x: x + Math.cos(angle) * distance,
+                        y: y + Math.sin(angle) * distance,
+                        alpha: 0,
+                        scaleX: 0.1,
+                        scaleY: 0.1,
+                        duration: 300 + Math.random() * 400,
+                        ease: 'Power2.easeOut',
+                        onComplete: () => particle.destroy()
+                    });
+                }
+            }
+            
+            // 반짝이는 자극 효과
+            createFlashEffect(x, y) {
+                const flash = this.scene.add.circle(x, y, 25, 0xFFFFFF, 0.9);
+                
+                this.scene.tweens.add({
+                    targets: flash,
+                    alpha: 0,
+                    duration: 150,
+                    ease: 'Power3.easeOut',
+                    onComplete: () => flash.destroy()
+                });
+            }
+            
+            // 반대방향 튕김 시각 효과
+            createBounceBackEffect(x, y, bounceAngle) {
+                // 튕김 방향 표시 주황색 에너지
+                const bounceIndicator = this.scene.add.circle(x, y, 15, 0x00AAFF, 0.9); // 노란색 제거
+                const targetX = x + Math.cos(bounceAngle) * 40;
+                const targetY = y + Math.sin(bounceAngle) * 40;
+                
+                this.scene.tweens.add({
+                    targets: bounceIndicator,
+                    x: targetX,
+                    y: targetY,
+                    scaleX: 0.3,
+                    scaleY: 0.3,
+                    alpha: 0,
+                    duration: 300,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => bounceIndicator.destroy()
+                });
+                
+                // 튕김 충격파
+                const bounceWave = this.scene.add.circle(x, y, 8, 0x00AAFF, 0.7); // 노란색 제거
+                bounceWave.setStrokeStyle(2, 0xFF6600, 1.0);
+                
+                this.scene.tweens.add({
+                    targets: bounceWave,
+                    scaleX: 3,
+                    scaleY: 3,
+                    alpha: 0,
+                    duration: 400,
+                    ease: 'Power3.easeOut',
+                    onComplete: () => bounceWave.destroy()
+                });
+            }
+            
+            // 튕김 트레일 효과
+            createBounceTrailEffect(startX, startY, endX, endY) {
+                const trail = this.scene.add.graphics();
+                trail.lineStyle(6, 0x00AAFF, 0.8); // 노란색 제거
+                trail.beginPath();
+                trail.moveTo(startX, startY);
+                trail.lineTo(endX, endY);
+                trail.strokePath();
+                
+                this.scene.tweens.add({
+                    targets: trail,
+                    alpha: 0,
+                    duration: 500,
+                    ease: 'Power2.easeOut',
+                    onComplete: () => trail.destroy()
+                });
+            }
+            
+            createDirectionParticles(x, y, angle) {
+                for (let i = 0; i < 3; i++) {
+                    const particle = this.scene.add.circle(x, y, 1, 0x00AAFF, 0.6); // 노란색 제거
+                    const distance = 15 + (i * 10);
+                    
+                    this.scene.tweens.add({
+                        targets: particle,
+                        x: x + Math.cos(angle) * distance,
+                        y: y + Math.sin(angle) * distance,
+                        alpha: 0,
+                        duration: 150 + (i * 50),
+                        ease: 'Power1.easeOut',
+                        onComplete: () => particle.destroy()
+                    });
+                }
+            }
+            
+            destroyMissile() {
+                // 미사일 소멸 시 폭발 효과 생성
+                if (this.active && this.scene && this.scene.createExplosion) {
+                    this.scene.createExplosion(this.x, this.y);
+                }
+                
+                this.setActive(false).setVisible(false);
+                this.glowEffect.setVisible(false);
+                this.body.stop();
+                
+                if (this.currentTrailGraphics) {
+                    this.currentTrailGraphics.destroy();
+                    this.currentTrailGraphics = null;
+                }
+                
+                this.state = 'INACTIVE';
+                this.target = null;
+                this.visitedTargets.clear();
+                this.trailPoints = [];
+                this.currentLifetime = 0;
+                this.wanderingTime = 0;
+                this.targetingDelay = 0;
+                this.hasFoundNewTarget = false;
+                this.newTarget = null;
+            }
+            
+            // 강화된 반대방향 튕김 효과 (MapleStory 스타일)
+            performEnhancedBounceBack(hitEnemy) {
+                // 피격된 적 방향의 반대로 강하게 튕김
+                const hitDirection = Phaser.Math.Angle.Between(this.x, this.y, hitEnemy.x, hitEnemy.y);
+                const bounceAngle = hitDirection + Math.PI; // 반대 방향
+                
+                // 큐빅 베지어 속도 리셋 + 강화된 튕김 (더 강하게)
+                this.currentSpeed = this.speedMax * (this.bounceBackForce + 0.5); // 3배 가속
+                
+                // 물리 속도 즉시 적용
+                this.scene.physics.velocityFromRotation(bounceAngle, this.currentSpeed, this.body.velocity);
+                this.rotation = bounceAngle;
+                
+                // 반대방향 튕김 시각 효과
+                this.createBounceBackEffect(this.x, this.y, bounceAngle);
+                
+                // 대시 참조점 저장 (시각적 지연 효과용)
+                const bounceStartX = this.x;
+                const bounceStartY = this.y;
+                
+                // 0.4초 동안 튕김 상태 유지
+                this.scene.time.delayedCall(100, () => {
+                    if (this.active) {
+                        // 유도미사일 노란색 트레일 효과 제거 (사용자 요청)
+                        // this.createBounceTrailEffect(bounceStartX, bounceStartY, this.x, this.y);
+                    }
+                });
+                
+                // 0.4초 후 서서히 정상 속도로 복귀
+                this.scene.time.delayedCall(400, () => {
+                    if (this.active && (this.state === 'SEEKING' || this.state === 'BOUNCING')) {
+                        this.currentSpeed = this.speedMin;
+                    }
+                });
+            }
+            
+            // 배회 모드 진입
+            enterWanderingMode() {
+                this.state = 'WANDERING';
+                this.wanderingTime = 0;
+                this.targetingDelay = 0;
+                this.hasFoundNewTarget = false;
+                this.newTarget = null;
+                
+                // 배회 중심점 설정 (현재 위치)
+                this.wanderingBaseX = this.x;
+                this.wanderingBaseY = this.y;
+                this.lemniscatePhase = Math.random() * Math.PI * 2; // 랜덤 시작 위상
+                
+            }
+            
+            // Lemniscate (∞자 궤적) 배회 패턴
+            updateWanderingMovement(delta) {
+                const dt = delta / 1000;
+                this.wanderingTime += dt;
+                
+                // ∞자 궤적 계산 (Lemniscate of Bernoulli)
+                this.lemniscatePhase += dt * 2; // 위상 증가 속도
+                const t = this.lemniscatePhase;
+                
+                // x = a*cos(t)/(1+sin²(t)), y = a*cos(t)*sin(t)/(1+sin²(t))
+                const sinT = Math.sin(t);
+                const cosT = Math.cos(t);
+                const denominator = 1 + sinT * sinT;
+                
+                const lemniscateX = this.lemniscateScale * cosT / denominator;
+                const lemniscateY = this.lemniscateScale * cosT * sinT / denominator;
+                
+                // 목표 위치 계산
+                const targetX = this.wanderingBaseX + lemniscateX;
+
+class TitleScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'TitleScene' });
+    }
+
+    preload() {
+        // 플레이어 이미지 로드 (미리보기용)
+        this.load.image('player', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="12" fill="#4CAF50" stroke="#2E7D32" stroke-width="2"/>
+                <circle cx="16" cy="16" r="6" fill="#81C784"/>
+            </svg>
+        `));
+    }
+
+    create() {
+        // 배경색 설정
+        this.cameras.main.setBackgroundColor('#0a0a1a');
+        
+        // 제목
+        const titleText = this.add.text(400, 150, 'GAME TOUNDER', {
+            fontSize: '72px',
+            color: '#4CAF50',
+            stroke: '#000000',
+            strokeThickness: 4,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        // 부제목
+        const subtitleText = this.add.text(400, 220, 'Survive the Wave', {
+            fontSize: '24px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 2
+        }).setOrigin(0.5);
+        
+        // 플레이어 미리보기 스프라이트
+        const playerPreview = this.add.sprite(400, 300, 'player');
+        playerPreview.setScale(2);
+        
+        // 펄스 효과
+        this.tweens.add({
+            targets: playerPreview,
+            scaleX: 2.2,
+            scaleY: 2.2,
+            duration: 1000,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Power2'
+        });
+        
+        // 조작법 안내
+        const controlsText = this.add.text(400, 380, [
+            'WASD / Arrow Keys - Move',
+            'Mouse Click - Dash',
+            'SPACE - Lightning Wave',
+            'L - Level Up (Test)'
+        ], {
+            fontSize: '18px',
+            color: '#cccccc',
+            stroke: '#000000',
+            strokeThickness: 1,
+            align: 'center'
+        }).setOrigin(0.5);
+        
+        // 시작 버튼
+        const startButton = this.add.rectangle(400, 500, 300, 60, 0x4CAF50, 0.9);
+        startButton.setStrokeStyle(3, 0xffffff);
+        startButton.setInteractive();
+        
+        const startButtonText = this.add.text(400, 500, 'START GAME', {
+            fontSize: '32px',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3,
+            fontWeight: 'bold'
+        }).setOrigin(0.5);
+        
+        // 시작 안내
+        const hintText = this.add.text(400, 570, 'Press SPACE or click START GAME', {
+            fontSize: '16px',
+            color: '#aaaaaa'
+        }).setOrigin(0.5);
+        
+        // 버튼 이벤트
+        const startGame = () => {
+            this.scene.start('GameScene');
+        };
+        
+        startButton.on('pointerdown', startGame);
+        
+        // 호버 효과
+        startButton.on('pointerover', () => {
+            startButton.setFillStyle(0x66BB6A, 1);
+            this.tweens.add({
+                targets: [startButton, startButtonText],
+                scaleX: 1.05,
+                scaleY: 1.05,
+                duration: 150
+            });
+        });
+        
+        startButton.on('pointerout', () => {
+            startButton.setFillStyle(0x4CAF50, 0.9);
+            this.tweens.add({
+                targets: [startButton, startButtonText],
+                scaleX: 1,
+                scaleY: 1,
+                duration: 150
+            });
+        });
+        
+        // 스페이스바로도 시작
+        this.input.keyboard.once('keydown-SPACE', startGame);
+        
+        // 제목 애니메이션
+        titleText.setAlpha(0);
+        this.tweens.add({
+            targets: titleText,
+            alpha: 1,
+            scaleX: 1.1,
+            scaleY: 1.1,
+            duration: 1000,
+            ease: 'Back.easeOut'
+        });
+        
+        // 순차적으로 요소들 페이드인
+        const elementsToFadeIn = [subtitleText, playerPreview, controlsText, startButton, startButtonText, hintText];
+        elementsToFadeIn.forEach((element, index) => {
+            element.setAlpha(0);
+            this.tweens.add({
+                targets: element,
+                alpha: 1,
+                duration: 600,
+                delay: 200 + (index * 150)
+            });
+        });
+    }
+}
+
+class GameScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'GameScene' });
+        this.initializeGameVariables();
+    }
+
+    initializeGameVariables() {
+        // 오브젝트 변수들
+        this.player = null;
+        this.enemies = null;
+        this.bullets = null;
+        this.energy = null;
+        this.bulletUpgrades = null;
+        this.explosions = null;
+        this.cursors = null;
+        this.wasd = null;
+        this.barrierVisualizationSystem = null;
+        
+        // 게임 상태 변수들
+        this.lastFired = 0;
+        this.fireRate = 200;
+        this.playerSpeed = 400;
+        this.bulletSpeed = 700;
+        this.baseEnemySpeed = 100;
+        this.score = 0;
+        this.weaponLevel = 1;
+        this.bulletCount = 1;
+        
+        // 새로운 총알 속성들
+        this.bulletDamage = 1.0; // 기본 총알 데미지 (0.5 → 1.0으로 증가)
+        this.bulletKnockback = 200; // 기본 넉백 강도
+        this.bulletAccuracy = 1.0; // 정확도 (1.0 = 완벽한 정확도)
+        this.bulletSize = 1.0; // 총알 크기 배율
+        this.explosiveBullets = false; // 폭발 총알 여부
+        this.explosiveDamageRatio = 0.5; // 폭발 범위 데미지 비율 (50%)
+        this.explosionRadiusMultiplier = 1.0; // 폭발 반경 배율
+        this.shrapnelExplosionEnabled = false; // 파편 폭발 여부
+        this.doubleShotEnabled = false; // 연속 발사 여부
+        this.doubleShotDamageReduction = 0.4; // 연속 발사 데미지 감소율
+        this.gameTime = 0;
+        this.eliteKills = 0;
+        
+        // 오각형 몬스터 시스템
+        this.pentagonWaveInterval = 5; // 5웨이브마다 등장
+        this.pentagonCount = 0; // 오각형 몬스터 카운터 (디버깅용)
+        
+        // UI 관련
+        this.scoreText = null;
+        this.weaponLevelText = null;
+        this.survivalTimeDisplay = null;
+        
+        // 물리/이동 관련
+        this.playerVelocity = { x: 0, y: 0 };
+        this.playerAcceleration = 1200;
+        this.playerDrag = 900;
+        this.fireRange = 300;
+        
+        // 월드 크기
+        this.worldWidth = 8000;
+        this.worldHeight = 6000;
+        
+        // 플레이어 상태
+        this.playerHealth = 3;
+        this.maxPlayerHealth = 3;
+        this.experience = 0;
+        this.experienceToNext = 100;
+        this.isPlayerInvincible = false;
+        
+        // 적 스폰 관련
+        this.enemySpawnRate = 1200;
+        this.difficultyLevel = 1;
+        this.enemiesPerWave = 1;
+        this.lastSpawnTime = 0;
+        
+        // 대쉬 시스템
+        this.dashCharges = 3;
+        this.maxDashCharges = 3;
+        this.dashCooldown = 4000;
+        this.dashDistance = 2000;
+        this.dashSpeed = 5000;
+        this.dashAcceleration = 15000;
+        this.isDashing = false;
+        this.dashCooldowns = [0, 0, 0];
+        this.dashGhosts = [];
+        this.dashLightning = null;
+        
+        // 아이템 시스템
+        this.bulletUpgradeSpawnRate = 15000;
+        this.lastBulletUpgradeSpawn = 0;
+        
+        // 엘리트 몬스터 시스템
+        this.eliteSpawnRate = 30000; // 30초로 대폭 단축
+        this.eliteSpawnChance = 0.70; // 70%로 대폭 증가
+        this.lastEliteSpawn = 0;
+        this.currentEliteCount = 0; // 현재 맵에 있는 엘리트 몬스터 수
+        this.maxEliteCount = 1; // 최대 엘리트 몬스터 수 (10웨이브 이후 2마리)
+        
+        // 번개 파동파 시스템
+        this.lightningWaveCooldown = 15000; // 15초 쿨다운
+        this.lightningWaveReady = true;
+        this.lightningWaveLastUsed = 0;
+        this.lightningWaveRadius = 800; // 800x800 범위 (4배 확대)
+        this.isLightningWaveActive = false; // 스킬 사용 중 무적 상태
+        
+        // 레벨업 시스템 보호 플래그들
+        this.isLevelingUp = false; // 레벨업 진행 중 중복 방지
+        this.isSkillSelectionActive = false; // 스킬 선택 중 게임 정지
+        this.doubleShockwaveActive = false; // 버그 수정: 이중 파동파 중복 실행 방지
+        
+        // 스킬 시스템
+        this.skillSystem = {
+            // 선택된 스킬들
+            selectedSkills: new Set(),
+            skillStacks: new Map(),
+            specialBehaviors: new Set(),
+            
+            // 액티브 스킬 상태
+            barrierCharges: 0,
+            maxBarrierCharges: 3,
+            
+            // 시간 제한 버프들
+            activeBuffs: new Map(),
+            
+            // UI 상태
+            isCardSelectionActive: false,
+            currentCardOptions: [],
+            
+            // 광고 관련 (추후 구현)
+            adRefreshCount: 0,
+            maxAdRefreshPerLevel: 1
+        };
+        
+        // 스킬 이벤트 핸들러 시스템
+        this.skillEventHandlers = {
+            onBulletHit: [],
+            onEnemyKill: [],
+            onPlayerHit: [],
+            onDashStart: [],
+            onDashEnd: [],
+            onLightningWave: [],
+            onLevelUp: []
+        };
+        
+        // 능력치 수정자 엔진 (추후 구현)
+        this.statModifierEngine = null;
+    }
+
+    preload() {
+        // 간단하고 안정적인 이미지들로 교체
+        this.load.image('player', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="32" height="32" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="12" fill="#4CAF50" stroke="#2E7D32" stroke-width="2"/>
+                <circle cx="16" cy="16" r="6" fill="#81C784"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy1', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="20" height="20" fill="#F44336" stroke="#C62828" stroke-width="2"/>
+                <rect x="8" y="8" width="8" height="8" fill="#E57373"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy2', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="10,2 18,18 10,14 2,18" fill="#FF5722" stroke="#BF360C" stroke-width="2"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy3', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="28" height="28" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="14" cy="14" r="12" fill="#9C27B0" stroke="#4A148C" stroke-width="2"/>
+                <circle cx="14" cy="14" r="6" fill="#BA68C8"/>
+            </svg>
+        `));
+        
+        this.load.image('bullet', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="8" height="8" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="4" cy="4" r="3" fill="#FFD54F" stroke="#FF8F00" stroke-width="1"/>
+            </svg>
+        `));
+        
+        this.load.image('energy', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="16" height="16" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="8,1 10,6 15,6 11,9 13,15 8,12 3,15 5,9 1,6 6,6" fill="#9C27B0" stroke="#6A1B9A" stroke-width="1"/>
+            </svg>
+        `));
+        
+        this.load.image('explosion', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="40" height="40" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#FF6B35"/>
+                <circle cx="20" cy="20" r="12" fill="#FFE66D"/>
+                <circle cx="20" cy="20" r="6" fill="#FFFFFF"/>
+            </svg>
+        `));
+        
+        this.load.image('bullet_upgrade', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="16" height="16" fill="#FFC107" stroke="#FF8F00" stroke-width="2" rx="2"/>
+                <rect x="8" y="6" width="4" height="2" fill="#FFFFFF"/>
+                <rect x="6" y="8" width="8" height="2" fill="#FFFFFF"/>
+                <rect x="8" y="10" width="4" height="2" fill="#FFFFFF"/>
+            </svg>
+        `));
+        
+        this.load.image('elite_monster', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="80" height="80" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="40" cy="40" r="35" fill="#8E24AA" stroke="#4A148C" stroke-width="4"/>
+                <circle cx="40" cy="40" r="25" fill="#9C27B0"/>
+                <circle cx="40" cy="40" r="15" fill="#BA68C8"/>
+                <circle cx="40" cy="40" r="8" fill="#E1BEE7"/>
+                <polygon points="40,10 45,25 40,22 35,25" fill="#FFD700"/>
+                <polygon points="40,70 45,55 40,58 35,55" fill="#FFD700"/>
+                <polygon points="10,40 25,45 22,40 25,35" fill="#FFD700"/>
+                <polygon points="70,40 55,45 58,40 55,35" fill="#FFD700"/>
+            </svg>
+        `));
+        
+        this.load.image('pentagon_monster', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="36" height="36" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="18,2 32,12 26,28 10,28 4,12" fill="#FF6B35" stroke="#D84315" stroke-width="2"/>
+                <polygon points="18,8 26,16 22,24 14,24 10,16" fill="#FF8A65"/>
+                <circle cx="18" cy="18" r="4" fill="#FFAB40"/>
+            </svg>
+        `));
+        
+        this.load.image('enemy_bullet', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="6" height="6" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="3" cy="3" r="2" fill="#FF1744" stroke="#B71C1C" stroke-width="1"/>
+            </svg>
+        `));
+        
+        this.load.image('star_elite_monster', 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
+            <svg width="60" height="60" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="30,5 35,20 50,20 38,30 43,45 30,35 17,45 22,30 10,20 25,20" fill="#FFD700" stroke="#FF8F00" stroke-width="3"/>
+                <polygon points="30,10 33,18 40,18 35,23 37,30 30,26 23,30 25,23 20,18 27,18" fill="#FFF176"/>
+                <circle cx="30" cy="25" r="4" fill="#FF6F00"/>
+            </svg>
+        `));
+    }
+
+    create() {
+        // 게임 재시작시 모든 변수 초기화
+        this.initializeGameVariables();
+        
+        // 능력치 수정자 엔진 초기화
+        this.statModifierEngine = new StatModifierEngine(this);
+        
+        // ⚡ 새로운 전기 시스템들 초기화
+        this.chainLightningSystem = new ChainLightningSystem(this);
+        this.electricFieldSystem = new ElectricFieldSystem(this);
+        
+        // 🛡️ 배리어 시각화 시스템 초기화 (플레이어 생성 후에 초기화됨)
+        
+        // 전기 스킬 시스템 (간단한 구현)
+        this.electricSkillSystem = {
+            activeRandomLightning: null,
+            lightningStrikeCount: 0,
+            electricFieldZones: [], // 전기장판들
+            electricFieldLevel: 0,
+            activeElectricField: null, // 전기장판 데미지 타이머
+            electricFieldRing: null, // 지속적인 전기 링 (단순화)
+            ringUpdateEvent: null, // 링 업데이트 이벤트
+            // 패턴 캐시 제거됨 - 정적 렌더링으로 대체
+            
+            // 전기 체인 공격 트리거
+            triggerElectricChain: (hitEnemy, skillLevel = 1) => {
+                if (Math.random() > 0.5) return false; // 50% 확률
+                
+                const chainConfig = {
+                    maxJumps: Math.min(3, skillLevel + 2),
+                    maxRange: 150 + (skillLevel * 25),
+                    damage: 8 + (skillLevel * 2),
+                    damageDecay: 0.85,
+                    duration: 120
+                };
+                
+                return this.chainLightningSystem.executeChainLightning(
+                    hitEnemy, hitEnemy.x, hitEnemy.y, chainConfig
+                );
+            },
+            
+            // 랜덤 번개 활성화 (타이머 버그 수정)
+            activateRandomLightning: (skillLevel = 1, duration = 15000) => {
+                if (this.electricSkillSystem.activeRandomLightning) {
+                    this.electricSkillSystem.activeRandomLightning.destroy();
+                    this.electricSkillSystem.activeRandomLightning = null;
+                }
+                
+                const config = {
+                    level: skillLevel,
+                    strikeInterval: Math.max(1000, 3000 - (skillLevel * 500)),
+                    strikesPerWave: skillLevel,
+                    damage: 12 + (skillLevel * 3),
+                    range: 80 + (skillLevel * 20)
+                };
+                
+                
+                // 단순한 반복 타이머 사용 (내장 반복 종료 기능 활용)
+                this.electricSkillSystem.activeRandomLightning = this.time.addEvent({
+                    delay: config.strikeInterval,
+                    callback: () => {
+                        if (this.player && this.player.active && !this.isSkillSelectionActive) {
+                            this.createRandomLightningStrike(config);
+                        }
+                    },
+                    loop: true // 무한 반복 (영구적)
+                });
+                
+                // 영구적 스킬로 변경 - 종료 타이머 제거
+                
+                this.showAutoSkillText(`천둥번개 Lv.${skillLevel} 활성화!`);
+                return true;
+            },
+
+            // 전기장판 활성화
+            activateElectricField: (skillLevel = 1) => {
+                // 기존 타이머들 정리
+                if (this.electricSkillSystem.activeElectricField) {
+                    this.electricSkillSystem.activeElectricField.destroy();
+                    this.electricSkillSystem.activeElectricField = null;
+                }
+                // 기존 시각적 링 제거 (단순화)
+                if (this.electricSkillSystem.electricFieldRing) {
+                    this.electricSkillSystem.electricFieldRing.destroy();
+                    this.electricSkillSystem.electricFieldRing = null;
+                }
+                if (this.electricSkillSystem.ringUpdateEvent) {
+                    this.electricSkillSystem.ringUpdateEvent.destroy();
+                    this.electricSkillSystem.ringUpdateEvent = null;
+                }
+
+                // 레벨 설정
+                this.electricSkillSystem.electricFieldLevel = skillLevel;
+                
+                // 전기장판 설정 (60% 크기로 축소)
+                const config = {
+                    level: skillLevel,
+                    baseRadius: 90, // 기본 반지름 (150 * 0.6 = 90)
+                    radiusIncrease: 30, // 레벨당 반지름 증가 (50 * 0.6 = 30)
+                    damageInterval: 1000, // 1초마다 데미지
+                    damage: 15 + (skillLevel * 5) // 기본 15 + 레벨당 5 데미지
+                };
+
+                // 지속적인 전기 링 생성
+                const radius = config.baseRadius + (config.level - 1) * config.radiusIncrease;
+                this.electricSkillSystem.electricFieldRing = this.createPersistentElectricRing(radius);
+
+                // 데미지 타이머 (1초마다)
+                this.electricSkillSystem.activeElectricField = this.time.addEvent({
+                    delay: config.damageInterval,
+                    callback: () => {
+                        if (this.player && this.player.active && !this.isSkillSelectionActive) {
+                            this.updateElectricField(config);
+                        }
+                    },
+                    loop: true
+                });
+
+                console.log(`전기장판 Lv.${skillLevel} 활성화됨!`);
+                this.showAutoSkillText(`전기장판 Lv.${skillLevel} 활성화!`);
+                return true;
+            }
+        };
+        
+        // 격자 배경 생성
+        this.createGridBackground();
+        
+        // 플레이어 생성
+        this.player = this.physics.add.sprite(this.worldWidth / 2, this.worldHeight / 2, 'player');
+        this.player.setCollideWorldBounds(true);
+        this.player.setDrag(this.playerDrag);
+        this.player.setMaxVelocity(this.playerSpeed);
+        
+        // 🛡️ 배리어 시각화 시스템 초기화 (플레이어 생성 후)
+        this.barrierVisualizationSystem = new BarrierVisualizationSystem(this, this.player);
+        
+        // 게임 오브젝트 그룹 생성
+        this.enemies = this.physics.add.group();
+        this.bullets = this.physics.add.group();
+        this.enemyBullets = this.physics.add.group();
+        this.energy = this.physics.add.group();
+        this.bulletUpgrades = this.physics.add.group();
+        this.explosions = this.add.group();
+        this.dashEffects = this.add.group();
+        
+        // 키보드 입력 설정
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys('W,S,A,D');
+        this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+        this.lKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
+        this.mKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M); // 미사일 테스트용
+        
+        // 마우스 클릭 이벤트
+        this.input.on('pointerdown', this.onPointerDown, this);
+        
+        // 카메라 설정
+        this.cameras.main.setBounds(0, 0, this.worldWidth, this.worldHeight);
+        this.cameras.main.startFollow(this.player, true, 0.05, 0.05);
+        
+        // UI 생성
+        this.createUI();
+        
+        // 게임 타이머들 설정
+        this.setupGameTimers();
+        
+        // 충돌 감지 설정
+        this.setupCollisionDetection();
+        
+        // 미사일 시스템 초기화 (모든 게임 오브젝트 생성 후)
+        this.initializeMissileSystem();
+        
+        // 미사일 풀이 생성된 후 미사일 충돌 감지 설정
+        this.setupMissileCollisions();
+        
+        // 월드 경계 설정
+        this.physics.world.setBounds(0, 0, this.worldWidth, this.worldHeight);
+        
+        // 🛡️ 초기 배리어 상태 시각화 (게임 시작 시 배리어가 있다면)
+        if (this.barrierVisualizationSystem && this.skillSystem.barrierCharges > 0) {
+            this.barrierVisualizationSystem.updateBarriers(this.skillSystem.barrierCharges);
+        }
     }
     
     // 게임 타이머들 설정
@@ -2972,6 +3784,11 @@ class GameScene extends Phaser.Scene {
             this.levelUp();
         }
         
+        // 🛡️ 배리어 시각화 시스템 업데이트
+        if (this.barrierVisualizationSystem) {
+            this.barrierVisualizationSystem.update(delta);
+        }
+        
         // M키로 미사일 발사 테스트 (디버깅용)
         if (Phaser.Input.Keyboard.JustDown(this.mKey)) {
             this.testMissileFire();
@@ -2992,6 +3809,11 @@ class GameScene extends Phaser.Scene {
         this.moveBulletUpgrades(delta);
         this.updateExplosions();
         this.updateUI();
+        
+        // 전기장판 시스템 업데이트
+        if (this.electricFieldSystem) {
+            this.electricFieldSystem.update();
+        }
     }
 
     moveBulletUpgrades(delta) {
@@ -3448,10 +4270,10 @@ class GameScene extends Phaser.Scene {
         
         // 새로운 총알 속성 적용
         bullet.damage = this.bulletDamage;
-        bullet.pierce = this.bulletPierce;
         bullet.knockbackForce = this.bulletKnockback;
         bullet.isExplosive = this.explosiveBullets;
         bullet.setScale(this.bulletSize);
+        
         
         // 정확도 적용 (낮은 정확도일수록 각도에 랜덤성 추가)
         const accuracySpread = (1.0 - this.bulletAccuracy) * 0.2; // 최대 0.2 라디안 (약 11도) 편차
@@ -3468,10 +4290,10 @@ class GameScene extends Phaser.Scene {
         
         // 새로운 총알 속성 적용
         bullet.damage = this.bulletDamage;
-        bullet.pierce = this.bulletPierce;
         bullet.knockbackForce = this.bulletKnockback;
         bullet.isExplosive = this.explosiveBullets;
         bullet.setScale(this.bulletSize);
+        
         
         const angle = Phaser.Math.Angle.Between(x, y, target.x, target.y);
         
@@ -4137,17 +4959,7 @@ class GameScene extends Phaser.Scene {
             this.electricSkillSystem.triggerElectricChain(enemy, skillLevel);
         }
         
-        // 관통 처리
-        if (bullet.pierce && bullet.pierce > 0) {
-            bullet.pierce--;
-            // 관통 횟수가 남아있으면 총알을 파괴하지 않음
-            if (bullet.pierce <= 0) {
-                bullet.destroy();
-            }
-        } else {
-            bullet.destroy();
-        }
-        
+        // 먼저 적이 죽었는지 확인하고 처리
         if (enemy.health <= 0) {
             // 디버깅: 오각형 몬스터 죽음 로그
             if (enemy.enemyType === 'pentagon_monster') {
@@ -4175,6 +4987,9 @@ class GameScene extends Phaser.Scene {
             
             this.handleEnemyDeath(enemy);
         }
+        
+        // 총알 파괴
+        bullet.destroy();
     }
 
     getEnemyPoints(type) {
@@ -4386,6 +5201,17 @@ class GameScene extends Phaser.Scene {
     missileHitEnemy(missile, enemy) {
         if (!missile.active || !enemy.active) return;
         
+        // 미사일 체인 라이트닝 체크
+        const chainLightningStacks = this.skillSystem.skillStacks.get('missile_chain_lightning') || 0;
+        if (chainLightningStacks > 0) {
+            this.chainLightningSystem.processMissileChainLightning(
+                enemy, 
+                missile.x, 
+                missile.y, 
+                chainLightningStacks
+            );
+        }
+        
         // 미사일의 onHit 메서드 호출
         if (missile.onHit && typeof missile.onHit === 'function') {
             missile.onHit(enemy);
@@ -4404,6 +5230,11 @@ class GameScene extends Phaser.Scene {
             this.skillSystem.barrierCharges--;
             this.showBarrierBreakEffect();
             console.log(`배리어로 공격 차단! 남은 배리어: ${this.skillSystem.barrierCharges}`);
+            
+            // 🛡️ 배리어 시각화 업데이트
+            if (this.barrierVisualizationSystem) {
+                this.barrierVisualizationSystem.removeBarrier();
+            }
             
             enemy.destroy();
             return; // 피해 무시
@@ -4497,6 +5328,11 @@ class GameScene extends Phaser.Scene {
     }
 
     gameOver() {
+        // 🛡️ 배리어 시각화 시스템 정리
+        if (this.barrierVisualizationSystem) {
+            this.barrierVisualizationSystem.destroy();
+        }
+        
         this.scene.pause();
         this.scene.launch('GameOverScene', { 
             score: this.score, 
@@ -4829,11 +5665,17 @@ class GameScene extends Phaser.Scene {
     applyInstantEffect(skill) {
         switch(skill.effect.action) {
             case 'add_barrier_charge':
+                const previousBarrierCount = this.skillSystem.barrierCharges;
                 this.skillSystem.barrierCharges = Math.min(
                     this.skillSystem.barrierCharges + 1,
                     this.skillSystem.maxBarrierCharges
                 );
                 console.log(`배리어 충전: ${this.skillSystem.barrierCharges}`);
+                
+                // 🛡️ 배리어 개수가 실제로 증가했을 때만 시각화 업데이트
+                if (this.skillSystem.barrierCharges > previousBarrierCount && this.barrierVisualizationSystem) {
+                    this.barrierVisualizationSystem.updateBarriers(this.skillSystem.barrierCharges);
+                }
                 break;
             case 'heal_player':
                 this.playerHealth = Math.min(this.playerHealth + 1, this.maxPlayerHealth);
@@ -5233,6 +6075,16 @@ class GameScene extends Phaser.Scene {
             case 'enable_shrapnel_explosion':
                 this.shrapnelExplosionEnabled = true;
                 console.log(`파편 폭발 활성화`);
+                break;
+            case 'activate_electric_field':
+                this.electricFieldSystem.activateElectricField();
+                console.log(`전기장판 활성화`);
+                break;
+            case 'activate_missile_chain_lightning':
+                // 미사일 체인 라이트닝 스택 업데이트
+                const currentStacks = this.skillSystem.skillStacks.get('missile_chain_lightning') || 0;
+                this.skillSystem.skillStacks.set('missile_chain_lightning', currentStacks + 1);
+                console.log(`미사일 체인 라이트닝 활성화 (스택: ${currentStacks + 1})`);
                 break;
         }
         
@@ -6553,7 +7405,421 @@ class GameOverScene extends Phaser.Scene {
     }
 }
 
-// 🌩️ Chain Lightning System - 체인 라이트닝 시스템
+// ElectricFieldSystem은 이제 별도 모듈에서 로드됩니다
+class ElectricFieldSystem {
+    constructor(gameScene) {
+        this.game = gameScene;
+        this.electricFields = new Map(); // 활성 전기장판들
+        this.fieldIdCounter = 0;
+        
+        // 기본 전기장판 설정
+        this.baseConfig = {
+            baseRadius: 80,        // 기본 반지름
+            radiusPerStack: 30,    // 스택당 추가 반지름
+            damage: 12,            // 초당 데미지
+            tickInterval: 500,     // 데미지 틱 간격 (ms)
+            duration: 999999999,   // 거의 영구적
+            pulseSpeed: 0.02,      // 시각 효과 펄스 속도
+            knockbackForce: 50,    // 넷백 힘
+            electricInterval: 300  // 전기 효과 간격 (ms)
+        };
+        
+        this.stacks = 0; // 현재 스택 수
+        this.isActive = false;
+    }
+    
+    // 전기장판 활성화/업그레이드
+    activateElectricField() {
+        this.stacks = Math.min(this.stacks + 1, 3);
+        
+        if (!this.isActive) {
+            this.isActive = true;
+            this.createElectricField();
+        } else {
+            this.upgradeElectricField();
+        }
+        
+        console.log(`전기장판 활성화! 스택: ${this.stacks}`);
+    }
+    
+    // 새 전기장판 생성
+    createElectricField() {
+        const fieldId = this.fieldIdCounter++;
+        const radius = this.calculateRadius();
+        
+        // 시각적 전기장판 생성
+        const fieldGraphics = this.game.add.graphics();
+        fieldGraphics.setDepth(5); // 플레이어보다 뒤, 적보다 앞
+        
+        // 전기장판 데이터
+        const fieldData = {
+            id: fieldId,
+            graphics: fieldGraphics,
+            radius: radius,
+            lastDamageTick: 0,
+            pulsePhase: 0
+        };
+        
+        this.electricFields.set(fieldId, fieldData);
+        
+        // 데미지 틱 타이머 설정
+        this.startDamageTicking();
+        
+        return fieldData;
+    }
+    
+    // 전기장판 업그레이드 (크기 증가)
+    upgradeElectricField() {
+        const newRadius = this.calculateRadius();
+        
+        for (let [id, field] of this.electricFields) {
+            field.radius = newRadius;
+        }
+        
+        console.log(`전기장판 업그레이드! 새 반지름: ${newRadius}`);
+    }
+    
+    // 현재 스택에 따른 반지름 계산
+    calculateRadius() {
+        return this.baseConfig.baseRadius + (this.stacks - 1) * this.baseConfig.radiusPerStack;
+    }
+    
+    // 데미지 틱 시작
+    startDamageTicking() {
+        if (this.damageTickEvent) return; // 이미 실행 중
+        
+        this.damageTickEvent = this.game.time.addEvent({
+            delay: this.baseConfig.tickInterval,
+            callback: this.processDamageTick,
+            callbackScope: this,
+            loop: true
+        });
+    }
+    
+    // 데미지 틱 처리
+    processDamageTick() {
+        if (!this.isActive || this.electricFields.size === 0) return;
+        
+        const currentTime = this.game.time.now;
+        
+        for (let [id, field] of this.electricFields) {
+            // 플레이어 위치에 전기장판 위치 업데이트
+            this.updateFieldPosition(field);
+            
+            // 범위 내 적들에게 데미지
+            this.damageEnemiesInRange(field);
+            
+            field.lastDamageTick = currentTime;
+        }
+    }
+    
+    // 전기장판 위치를 플레이어 위치로 업데이트
+    updateFieldPosition(field) {
+        if (!this.game.player) return;
+        
+        field.centerX = this.game.player.x;
+        field.centerY = this.game.player.y;
+    }
+    
+    // 범위 내 적들에게 데미지
+    damageEnemiesInRange(field) {
+        if (!this.game.enemies || !this.game.enemies.children) return;
+        
+        const enemies = this.game.enemies.children.entries;
+        const damagedEnemies = [];
+        
+        for (let enemy of enemies) {
+            if (!enemy.active) continue;
+            
+            const distance = Phaser.Math.Distance.Between(
+                field.centerX, field.centerY,
+                enemy.x, enemy.y
+            );
+            
+            if (distance <= field.radius) {
+                // 데미지 적용
+                const damage = this.baseConfig.damage;
+                enemy.health = (enemy.health || enemy.maxHealth || 100) - damage;
+                
+                // 전기 넷백 및 효과
+                this.applyElectricEffect(enemy, field.centerX, field.centerY);
+                
+                damagedEnemies.push(enemy);
+                
+                // 적 사망 처리
+                if (enemy.health <= 0) {
+                    enemy.destroy();
+                }
+            }
+        }
+        
+        return damagedEnemies;
+    }
+    
+    // 전기 효과 생성
+    createElectricEffect(x, y) {
+        this.createSimpleElectricEffect(x, y);
+    }
+    
+    // 전기 효과 및 넷백 적용
+    applyElectricEffect(enemy, centerX, centerY) {
+        // 넷백 계산
+        const angle = Math.atan2(enemy.y - centerY, enemy.x - centerX);
+        const knockbackX = Math.cos(angle) * this.baseConfig.knockbackForce;
+        const knockbackY = Math.sin(angle) * this.baseConfig.knockbackForce;
+        
+        // 넷백 적용 (적에 속도가 있는 경우)
+        if (enemy.body) {
+            enemy.body.setVelocity(
+                (enemy.body.velocity.x || 0) + knockbackX,
+                (enemy.body.velocity.y || 0) + knockbackY
+            );
+        } else {
+            // 물리 몸체가 없는 경우 직접 위치 이동
+            enemy.x += knockbackX * 0.1;
+            enemy.y += knockbackY * 0.1;
+        }
+        
+        // 전기 타격 효과
+        this.createElectricHitEffect(enemy.x, enemy.y);
+        
+        // 적에게 전기 디버프 효과 (선택적)
+        if (Math.random() < 0.3) { // 30% 확률로 전기 충격 표시
+            this.addElectricShockEffect(enemy);
+        }
+    }
+    
+    // 전기 타격 효과
+    createElectricHitEffect(x, y) {
+        const sparkGraphics = this.game.add.graphics();
+        sparkGraphics.setPosition(x, y);
+        sparkGraphics.setDepth(15);
+        
+        // 강력한 전기 스파크
+        const colors = [0x00ffff, 0x66ffff, 0x99ffff];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        sparkGraphics.lineStyle(2.5, color, 0.9);
+        sparkGraphics.beginPath();
+        
+        for (let i = 0; i < 4; i++) {
+            const angle = (i / 4) * Math.PI * 2 + Math.random() * 0.3;
+            const length = 15 + Math.random() * 10;
+            const endX = Math.cos(angle) * length;
+            const endY = Math.sin(angle) * length;
+            
+            // 지그재그 효과
+            sparkGraphics.moveTo(0, 0);
+            const midX = endX * 0.6 + (Math.random() - 0.5) * 8;
+            const midY = endY * 0.6 + (Math.random() - 0.5) * 8;
+            sparkGraphics.lineTo(midX, midY);
+            sparkGraphics.lineTo(endX, endY);
+        }
+        
+        sparkGraphics.strokePath();
+        
+        // 빠른 페이드
+        this.game.tweens.add({
+            targets: sparkGraphics,
+            alpha: 0,
+            scaleX: 1.3,
+            scaleY: 1.3,
+            duration: 300,
+            ease: 'Power2.easeOut',
+            onComplete: () => sparkGraphics.destroy()
+        });
+    }
+    
+    // 적에게 전기 충격 효과
+    addElectricShockEffect(enemy) {
+        // 적 주위에 전기 충격 이팩트
+        const shockGraphics = this.game.add.graphics();
+        shockGraphics.setPosition(enemy.x, enemy.y);
+        shockGraphics.setDepth(16);
+        
+        // 전기 충격 원
+        shockGraphics.lineStyle(3, 0x00ffff, 0.7);
+        shockGraphics.strokeCircle(0, 0, 20);
+        shockGraphics.lineStyle(2, 0x66ffff, 0.5);
+        shockGraphics.strokeCircle(0, 0, 25);
+        
+        // 충격 효과 애니메이션
+        this.game.tweens.add({
+            targets: shockGraphics,
+            alpha: 0,
+            scaleX: 2,
+            scaleY: 2,
+            duration: 400,
+            ease: 'Power3.easeOut',
+            onComplete: () => shockGraphics.destroy()
+        });
+        
+        // 적 깜박임 효과
+        if (enemy.tint !== undefined) {
+            enemy.tint = 0x66ffff;
+            this.game.time.delayedCall(100, () => {
+                if (enemy && enemy.active) {
+                    enemy.tint = 0xffffff;
+                }
+            });
+        }
+    }
+    
+    // 간단한 전기 효과 (호환성을 위해 유지)
+    createSimpleElectricEffect(x, y) {
+        this.createElectricHitEffect(x, y);
+    }
+    
+    
+    // 업데이트 루프 (깨끗한 시각 효과)
+    update() {
+        if (!this.isActive) return;
+        
+        for (let [id, field] of this.electricFields) {
+            this.updateFieldVisuals(field);
+        }
+    }
+    
+    // 전기장판 시각 효과 업데이트
+    updateFieldVisuals(field) {
+        if (!this.game.player) return;
+        
+        // 플레이어 위치로 이동
+        field.centerX = this.game.player.x;
+        field.centerY = this.game.player.y;
+        
+        // 펄스 효과
+        field.pulsePhase += this.baseConfig.pulseSpeed;
+        const pulseScale = 1 + Math.sin(field.pulsePhase) * 0.1;
+        const alpha = 0.3 + Math.sin(field.pulsePhase * 2) * 0.1;
+        
+        // 그래픽 업데이트 - 내부 파티클 완전 제거
+        field.graphics.clear();
+        
+        // 내부는 완전히 비우고 가장자리만 표시
+        
+        // 깨끗한 전기 링 효과
+        this.drawElectricRing(field, pulseScale, alpha);
+    }
+    
+    // 강력한 전기 링 그리기
+    drawElectricRing(field, pulseScale, alpha) {
+        const centerX = field.centerX;
+        const centerY = field.centerY;
+        const radius = field.radius * pulseScale;
+        
+        // 강력한 메인 전기 링 (더 굵게)
+        const mainThickness = 8; // 3에서 8로 증가
+        field.graphics.lineStyle(mainThickness, 0x00ffff, alpha * 1.5);
+        field.graphics.strokeCircle(centerX, centerY, radius);
+        
+        // 내부 전기 코어
+        field.graphics.lineStyle(mainThickness - 3, 0x99ffff, alpha * 1.0);
+        field.graphics.strokeCircle(centerX, centerY, radius - 1);
+        
+        // 중간 전기 레이어
+        field.graphics.lineStyle(mainThickness + 2, 0x66ffff, alpha * 0.8);
+        field.graphics.strokeCircle(centerX, centerY, radius + 2);
+        
+        // 외부 글로우
+        field.graphics.lineStyle(mainThickness + 6, 0x00aaff, alpha * 0.3);
+        field.graphics.strokeCircle(centerX, centerY, radius + 6);
+        
+        // 강화된 전기 링 효과
+        this.addElectricRingEffects(field, centerX, centerY, radius, alpha);
+    }
+    
+    // 전기 링 효과 강화
+    addElectricRingEffects(field, centerX, centerY, radius, alpha) {
+        // 더 빈번한 전기적 변동
+        if (Math.random() < 0.3) { // 10%에서 30%로 증가
+            field.graphics.lineStyle(2, 0xffffff, alpha * 0.9);
+            const segments = 48; // 더 세밀한 세그먼트
+            field.graphics.beginPath();
+            
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                const variation = (Math.random() - 0.5) * 8; // 더 강한 변동
+                const electricRadius = radius + variation;
+                const x = centerX + Math.cos(angle) * electricRadius;
+                const y = centerY + Math.sin(angle) * electricRadius;
+                
+                if (i === 0) {
+                    field.graphics.moveTo(x, y);
+                } else {
+                    field.graphics.lineTo(x, y);
+                }
+            }
+            
+            field.graphics.closePath();
+            field.graphics.strokePath();
+        }
+        
+        // 전기 스파크 링 주위에
+        if (Math.random() < 0.2) {
+            this.createRingSparkEffect(centerX, centerY, radius);
+        }
+    }
+    
+    // 링 주위 스파크 효과
+    createRingSparkEffect(centerX, centerY, radius) {
+        const sparkCount = 3 + Math.floor(Math.random() * 3); // 3-5개 스파크
+        
+        for (let i = 0; i < sparkCount; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const sparkRadius = radius + (Math.random() - 0.5) * 10;
+            const sparkX = centerX + Math.cos(angle) * sparkRadius;
+            const sparkY = centerY + Math.sin(angle) * sparkRadius;
+            
+            const sparkGraphics = this.game.add.graphics();
+            sparkGraphics.setPosition(sparkX, sparkY);
+            sparkGraphics.setDepth(14);
+            
+            // 짧은 전기 스파크
+            sparkGraphics.lineStyle(1.5, 0x00ffff, 0.9);
+            sparkGraphics.beginPath();
+            
+            for (let j = 0; j < 3; j++) {
+                const sparkAngle = (j / 3) * Math.PI * 2 + Math.random() * 0.3;
+                const sparkLength = 6 + Math.random() * 4;
+                const endX = Math.cos(sparkAngle) * sparkLength;
+                const endY = Math.sin(sparkAngle) * sparkLength;
+                
+                sparkGraphics.moveTo(0, 0);
+                sparkGraphics.lineTo(endX, endY);
+            }
+            
+            sparkGraphics.strokePath();
+            
+            // 빠르게 사라짐
+            this.game.tweens.add({
+                targets: sparkGraphics,
+                alpha: 0,
+                duration: 200 + Math.random() * 100,
+                onComplete: () => sparkGraphics.destroy()
+            });
+        }
+    }
+    
+    // 시스템 정리
+    destroy() {
+        if (this.damageTickEvent) {
+            this.damageTickEvent.destroy();
+            this.damageTickEvent = null;
+        }
+        
+        for (let [id, field] of this.electricFields) {
+            if (field.graphics) {
+                field.graphics.destroy();
+            }
+        }
+        
+        this.electricFields.clear();
+        this.isActive = false;
+        this.stacks = 0;
+    }
+}
+
+// ChainLightningSystem은 이제 별도 모듈에서 로드됩니다
 class ChainLightningSystem {
     constructor(gameScene) {
         this.game = gameScene;
@@ -6914,10 +8180,37 @@ class ChainLightningSystem {
             }
         }
     }
+    
+    // 미사일 체인 라이트닝 처리 (유도미사일 전용)
+    processMissileChainLightning(hitEnemy, missileX, missileY, stacks = 1) {
+        const chainProbability = 0.2; // 20% 기본 확률
+        const maxChainJumps = Math.min(stacks, 2); // 스택에 따른 최대 점프 수
+        
+        // 확률 체크
+        if (Math.random() > chainProbability) {
+            return false; // 체인 발생하지 않음
+        }
+        
+        console.log(`미사일 체인 라이트닝 발동! 최대 점프: ${maxChainJumps}`);
+        
+        // 특별한 미사일 체인 설정
+        const missileChainConfig = {
+            maxJumps: maxChainJumps,
+            maxRange: 150,          // 미사일 체인은 조금 더 짧은 범위
+            damage: 20,             // 미사일 체인은 더 강한 데미지
+            damageDecay: 0.9,       // 덜 감소
+            duration: 100,          // 더 빠른 체인
+            visualEffect: 'missile_chain' // 시각 효과 구분
+        };
+        
+        // 체인 라이트닝 실행
+        return this.executeChainLightning(hitEnemy, missileX, missileY, missileChainConfig);
+    }
 }
 
 // Export main classes for modular use
-export { StatModifierEngine, TitleScene, GameScene, GameOverScene, skillDefinitions, ChainLightningSystem };
+// 분리된 모듈들은 이제 각각의 파일에서 export됩니다
+export { TitleScene, GameScene, GameOverScene };
 
 // 게임 인스턴스 생성은 main.js에서 담당
 // 이곳에서는 클래스 정의만 export
