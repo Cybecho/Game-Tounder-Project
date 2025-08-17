@@ -1559,13 +1559,41 @@ class GameScene extends Phaser.Scene {
                 this.handleBounce(enemy);
             }
 
-            // 번개 체인 공격 트리거
+            // 번개 체인 공격 트리거 (플레이어 번개체인 시스템 활용)
             triggerLightningChain(hitEnemy, skillLevel) {
-                const maxChains = skillLevel; // 레벨 1: 1회, 레벨 2: 2회 전이
-                const chainRange = 150; // 체인 범위
-                const chainDamage = Math.floor(this.damage * 0.8); // 미사일 데미지의 80%
+                // 플레이어 번개체인과 동일한 시스템 사용 (50% 데미지)
+                const playerChainDamage = 8 + (skillLevel * 2); // 플레이어 번개체인 데미지
+                const chainDamage = Math.floor(playerChainDamage * 0.5); // 50% 데미지
                 
-                // 체인 가능한 다른 적들 찾기
+                const chainConfig = {
+                    maxJumps: skillLevel, // 레벨 1: 1회, 레벨 2: 2회 전이
+                    maxRange: 150, // 체인 범위 (플레이어와 동일)
+                    damage: chainDamage,
+                    damageDecay: 0.85, // 플레이어와 동일한 감쇠율
+                    duration: 120 // 시각 효과 지속시간
+                };
+                
+                // 플레이어의 번개체인 시스템 직접 활용
+                if (this.scene.electricSkillSystem && this.scene.electricSkillSystem.chainLightningSystem) {
+                    const success = this.scene.electricSkillSystem.chainLightningSystem.executeChainLightning(
+                        hitEnemy, hitEnemy.x, hitEnemy.y, chainConfig
+                    );
+                    
+                    if (success) {
+                        this.scene.showAutoSkillText(`번개 유도미사일 체인!`, 0x00ffff);
+                    }
+                } else {
+                    // 백업: 기존 로직 사용
+                    console.log('체인 라이트닝 시스템 없음, 기존 로직 사용');
+                    this.triggerLightningChainFallback(hitEnemy, skillLevel, chainDamage);
+                }
+            }
+            
+            // 백업용 번개체인 로직
+            triggerLightningChainFallback(hitEnemy, skillLevel, chainDamage) {
+                const maxChains = skillLevel;
+                const chainRange = 150;
+                
                 const nearbyEnemies = this.scene.enemies.children.entries.filter(enemy => {
                     if (!enemy.active || enemy === hitEnemy) return false;
                     const distance = Phaser.Math.Distance.Between(
@@ -1576,12 +1604,10 @@ class GameScene extends Phaser.Scene {
                 
                 if (nearbyEnemies.length === 0) return;
                 
-                // 체인 공격 실행
                 let currentTarget = hitEnemy;
                 let chainedEnemies = new Set([hitEnemy]);
                 
                 for (let i = 0; i < maxChains && nearbyEnemies.length > 0; i++) {
-                    // 아직 체인되지 않은 가장 가까운 적 찾기
                     const validTargets = nearbyEnemies.filter(enemy => !chainedEnemies.has(enemy));
                     if (validTargets.length === 0) break;
                     
@@ -1591,22 +1617,16 @@ class GameScene extends Phaser.Scene {
                         return dist1 < dist2 ? enemy : closest;
                     });
                     
-                    // 번개 체인 시각 효과
                     this.scene.createLightningBolt(currentTarget.x, currentTarget.y, nextTarget.x, nextTarget.y);
-                    
-                    // 데미지 적용 (기존 패턴 사용)
                     nextTarget.health -= chainDamage;
                     this.scene.createDamageText(nextTarget.x, nextTarget.y - 20, chainDamage, false, 0x00ffff);
-                    
-                    // 전기 타격 효과
                     this.scene.createElectricHitEffect(nextTarget.x, nextTarget.y);
                     
                     chainedEnemies.add(nextTarget);
                     currentTarget = nextTarget;
                 }
                 
-                // 체인 공격 알림
-                this.scene.showAutoSkillText(`번개 체인 x${chainedEnemies.size - 1}!`, 0x00ffff);
+                this.scene.showAutoSkillText(`번개 유도미사일 체인 x${chainedEnemies.size - 1}!`, 0x00ffff);
             }
             
             applyDamage(enemy) {
